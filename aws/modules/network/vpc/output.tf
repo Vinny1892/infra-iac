@@ -7,11 +7,10 @@ output "vpc_cidr" {
 }
 
 output "subnet_private" {
-  value = aws_subnet.private.cidr_block
+  value = aws_subnet.private
 }
-
 output "subnet_public" {
-  value = aws_subnet.public.cidr_block
+  value = aws_subnet.public
 }
 
 output "nat_gateway_private_ip" {
