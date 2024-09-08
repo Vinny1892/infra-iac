@@ -22,3 +22,8 @@ data "aws_vpc" "vpc" {
     values = ["MainVPC"]
   }
 }
+
+data "aws_service_discovery_dns_namespace" "internal_dns" {
+  name = "regulus.internal"
+  type = "DNS_PRIVATE"
+}
