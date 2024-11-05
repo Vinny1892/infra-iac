@@ -1,5 +1,6 @@
 terraform {
   backend "s3" {
+    profile = "personal"
     bucket         = "infra-terraform-state-seila"
     key            = "aws/account/personal/internal_domain/terraform.tfstate"
     region         = "us-east-1"

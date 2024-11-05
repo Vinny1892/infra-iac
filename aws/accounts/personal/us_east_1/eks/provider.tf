@@ -5,16 +5,13 @@ terraform {
       source  = "hashicorp/aws"
       version = "~> 5.0"
     }
-    cloudflare = {
-      source = "cloudflare/cloudflare"
-      version = "4.41.0"
-    }
   }
 }
 
 # Configure the AWS Provider
 provider "aws" {
   region = "us-east-1"
+  profile = "sandim-account"
   default_tags {
     tags = {
       managed_by = "terraform"
@@ -23,4 +20,3 @@ provider "aws" {
     }
   }
 }
-
