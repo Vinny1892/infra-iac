@@ -1,8 +1,6 @@
 # Variable configuration
 TF_OPTIONS := --auto-approve
 
-# Commands
-
 # Display available targets and their descriptions
 .PHONY: help
 help:
@@ -27,14 +25,16 @@ plan:
 	terraform plan $(TF_OPTIONS)
 
 # Apply Terraform configuration
-.PHONY: apply
-apply:
-	terraform -chdir=./accounts/personal/applications apply $(TF_OPTIONS)
+.PHONY: apply-core
+apply-core:
+	terraform -chdir=./network/vpc apply $(TF_OPTIONS)
+	terraform -chdir=./internal_domain apply $(TF_OPTIONS)
+	terraform -chdir=./ecs_cluster apply $(TF_OPTIONS)
+	
 
 
-.PHONY: destroy
-destroy:
-	terraform  -chdir=./accounts/personal/applications apply $(TF_OPTIONS)
-	terraform  -chdir=./accounts/personal/internal_domain destroy $(TF_OPTIONS)
-	terraform  -chdir=./accounts/personal/ecs_cluster destroy $(TF_OPTIONS)
-	terraform  -chdir=./accounts/personal/network/vpc destroy $(TF_OPTIONS)
+.PHONY: destroy-core
+destroy-core:
+	terraform -chdir=./internal_domain destroy $(TF_OPTIONS)
+	terraform -chdir=./network/vpc destroy $(TF_OPTIONS)
+	terraform -chdir=./ecs_cluster destroy $(TF_OPTIONS)
