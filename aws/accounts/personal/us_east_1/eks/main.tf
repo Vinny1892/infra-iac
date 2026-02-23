@@ -31,6 +31,7 @@ data "aws_vpc" "vpc" {
 
 module "eks_cluster" {
   source = "../../../../modules/eks"
+  max_pods_per_node = 140
 
   region               = "us-east-1"
   cluster_name         = "my-eks-cluster"
@@ -39,6 +40,6 @@ module "eks_cluster" {
   public_subnet_id     = data.aws_subnets.public.ids[0]
   worker_instance_type = "t3.medium"
   desired_capacity     = 2
-  max_capacity         = 3
+  max_capacity         = 2
   min_capacity         = 1
 }

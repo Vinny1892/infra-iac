@@ -55,3 +55,9 @@ variable "target_group_arns" {
   type        = list(string)
   default     = []
 }
+
+variable "max_pods_per_node" {
+  description = "Maximum number of pods per node (use higher values with prefix delegation)"
+  type        = number
+  default     = 110
+}

@@ -108,6 +108,35 @@ resource "aws_iam_instance_profile" "eks_worker_profile" {
   role = aws_iam_role.eks_worker_role.name
 }
 
+resource "aws_launch_template" "eks_nodes" {
+  name = "${var.cluster_name}-node-template"
+
+  user_data = base64encode(<<-EOF
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="BOUNDARY"
+
+--BOUNDARY
+Content-Type: application/node.eks.aws
+
+---
+apiVersion: node.eks.aws/v1alpha1
+kind: NodeConfig
+spec:
+  kubelet:
+    config:
+      maxPods: ${var.max_pods_per_node}
+--BOUNDARY--
+EOF
+  )
+
+  tag_specifications {
+    resource_type = "instance"
+    tags = {
+      Name = "${var.cluster_name}-node"
+    }
+  }
+}
+
 resource "aws_eks_node_group" "node_group" {
   cluster_name    = aws_eks_cluster.eks_cluster.name
   node_group_name = "${var.cluster_name}-node-group"
@@ -115,16 +144,21 @@ resource "aws_eks_node_group" "node_group" {
   subnet_ids      = var.subnet_ids
 
   scaling_config {
-    desired_size = 1
-    max_size     = 2
-    min_size     = 1
+    desired_size = var.desired_capacity
+    max_size     = var.max_capacity
+    min_size     = var.min_capacity
   }
-    depends_on = [
+
+  launch_template {
+    id      = aws_launch_template.eks_nodes.id
+    version = aws_launch_template.eks_nodes.latest_version
+  }
+
+  depends_on = [
     aws_iam_role_policy_attachment.eks_worker_AmazonEKSWorkerNodePolicy,
     aws_iam_role_policy_attachment.example-AmazonEKS_CNI_Policy,
     aws_iam_role_policy_attachment.eks_worker_AmazonEC2ContainerRegistryReadOnly,
   ]
-
 }
 
 
@@ -132,6 +166,13 @@ resource "aws_eks_addon" "addon1"{
   cluster_name = aws_eks_cluster.eks_cluster.name
   addon_name = "vpc-cni"
   addon_version = "v1.18.3-eksbuild.3"
+  
+  configuration_values = jsonencode({
+    env = {
+      ENABLE_PREFIX_DELEGATION = "true"
+      WARM_PREFIX_TARGET       = "1"
+    }
+  })
 }
 resource "aws_eks_addon" "addon3"{
   cluster_name = aws_eks_cluster.eks_cluster.name
@@ -139,11 +180,44 @@ resource "aws_eks_addon" "addon3"{
   addon_version = "v1.3.2-eksbuild.2"
   service_account_role_arn = aws_iam_role.test_role.arn
 }
-# resource "aws_eks_addon" "addon2"{
-#   cluster_name = aws_eks_cluster.eks_cluster.name
-#   addon_name = "EBS-CSI"
-#   addon_version = "v1.34.0-eksbuild.1"
-# }
+# IAM role for EBS CSI Driver
+data "aws_iam_policy_document" "ebs_csi_assume_role" {
+  statement {
+    actions = ["sts:AssumeRoleWithWebIdentity"]
+    principals {
+      type        = "Federated"
+      identifiers = [aws_iam_openid_connect_provider.eks.arn]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "${replace(aws_eks_cluster.eks_cluster.identity[0].oidc[0].issuer, "https://", "")}:sub"
+      values   = ["system:serviceaccount:kube-system:ebs-csi-controller-sa"]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "${replace(aws_eks_cluster.eks_cluster.identity[0].oidc[0].issuer, "https://", "")}:aud"
+      values   = ["sts.amazonaws.com"]
+    }
+  }
+}
+
+resource "aws_iam_role" "ebs_csi_role" {
+  name               = "${var.cluster_name}-ebs-csi-role"
+  assume_role_policy = data.aws_iam_policy_document.ebs_csi_assume_role.json
+}
+
+resource "aws_iam_role_policy_attachment" "ebs_csi_policy" {
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy"
+  role       = aws_iam_role.ebs_csi_role.name
+}
+
+resource "aws_eks_addon" "ebs_csi" {
+  cluster_name             = aws_eks_cluster.eks_cluster.name
+  addon_name               = "aws-ebs-csi-driver"
+  service_account_role_arn = aws_iam_role.ebs_csi_role.arn
+
+  depends_on = [aws_iam_role_policy_attachment.ebs_csi_policy]
+}
 
 data "tls_certificate" "this" {
   url = aws_eks_cluster.eks_cluster.identity[0].oidc[0].issuer
