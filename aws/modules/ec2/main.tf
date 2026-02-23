@@ -24,7 +24,7 @@ resource "aws_iam_instance_profile" "ssm_instance_profile" {
   role = aws_iam_role.ssm_role.name
 }
 resource "aws_key_pair" "deployer" {
-  key_name   = "personal_ssh"
+  key_name   = "personal_ssh-${var.instance_name}"
   public_key = file("~/.ssh/id_ed25519.pub")
 }
 

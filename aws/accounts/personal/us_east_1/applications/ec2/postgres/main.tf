@@ -36,17 +36,17 @@ module "tunnel" {
 
 } 
 
-# module "dns_record" {
-#  source = "../../../../../../../cloudflare/modules/domain"
-#   # source = "git::git@github.com:Vinny1892/infra-iac.git//cloudflare/modules/domain?ref=master"
-#   dns    = {
-#     name =   local.domain_name
-#     content = module.postgres.instance_public_ip
-#     type = local.type
-#   }
-#   cloudflare_zone_id = var.cloudflare_zone_id
-#   proxiable          = true
-# }
+module "dns_record" {
+ source = "../../../../../../../cloudflare/modules/domain"
+  # source = "git::git@github.com:Vinny1892/infra-iac.git//cloudflare/modules/domain?ref=master"
+  dns    = {
+    name =   local.domain_name
+    content = module.postgres.instance_public_ip
+    type = local.type
+  }
+  cloudflare_zone_id = var.cloudflare_zone_id
+  proxiable          = true
+}
 
 # module "internal_dns" {
 #   source = "../../../../../../modules/cloud_map/internal_domain"
