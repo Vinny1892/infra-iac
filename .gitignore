@@ -1,3 +1,14 @@
 **/**/.terraform/*
+**/**/.terragrunt-cache/
 **/**/*.tfvars
+**/.terraform.lock.hcl
+**/*.tfstate
+**/*.tfstate.backup
+**/*.tfplan
 .idea/
+**/.kubeconfig
+
+# Terragrunt generated Terraform files (real modules are in modules/)
+aws/**/*.tf
+gcp/**/*.tf
+oci/**/*.tf
