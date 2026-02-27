@@ -9,7 +9,7 @@ AZ=$(curl -s http://169.254.169.254/latest/meta-data/placement/availability-zone
 PROVIDER_ID="aws:///$${AZ}/$${INSTANCE_ID}"
 
 # Install K3s server
-curl -sfL https://get.k3s.io | sh -s - server \
+curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION="v1.35.1+k3s1" sh -s - server \
     --write-kubeconfig-mode 644 \
     --disable=traefik \
     --disable=servicelb \

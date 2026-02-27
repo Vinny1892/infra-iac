@@ -2,27 +2,8 @@ include "root" {
   path = find_in_parent_folders("root.hcl")
 }
 
-include "region" {
-  path = find_in_parent_folders("_region.hcl")
-}
-
-terraform {
-  source = "../../../../../../../organisms/aws/k3s/cluster"
-}
-
-generate "tls_provider" {
-  path      = "tls_provider.tf"
-  if_exists = "overwrite_terragrunt"
-  contents  = <<EOF
-terraform {
-  required_providers {
-    tls = {
-      source  = "hashicorp/tls"
-      version = "~> 4.0"
-    }
-  }
-}
-EOF
+include "organism" {
+  path = "../../../../../../../organisms/aws/k3s/cluster/terragrunt.hcl"
 }
 
 dependency "vpc" {
