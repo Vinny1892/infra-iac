@@ -125,10 +125,31 @@ variable "cloudflare_api_token" {
 # cert-manager
 # =============================================================================
 
+resource "kubernetes_namespace" "cert_manager" {
+  metadata {
+    name = "cert-manager"
+  }
+}
+
+resource "kubernetes_secret" "cloudflare_api_token" {
+  metadata {
+    name      = "cloudflare-api-token"
+    namespace = "cert-manager"
+  }
+
+  data = {
+    "api-token" = var.cloudflare_api_token
+  }
+
+  type = "Opaque"
+
+  depends_on = [kubernetes_namespace.cert_manager]
+}
+
 resource "helm_release" "cert_manager" {
   name             = "cert-manager"
   namespace        = "cert-manager"
-  create_namespace = true
+  create_namespace = false
 
   repository = "https://charts.jetstack.io"
   chart      = "cert-manager"
@@ -138,6 +159,33 @@ resource "helm_release" "cert_manager" {
     name  = "crds.enabled"
     value = "true"
   }
+
+  values = [<<-YAML
+    extraArgs:
+      - "--dns01-recursive-nameservers-only"
+      - "--dns01-recursive-nameservers=1.1.1.1:53,1.0.0.1:53"
+    extraObjects:
+      - |
+        apiVersion: cert-manager.io/v1
+        kind: ClusterIssuer
+        metadata:
+          name: letsencrypt-prod
+        spec:
+          acme:
+            email: admin@vinny.dev.br
+            server: https://acme-v02.api.letsencrypt.org/directory
+            privateKeySecretRef:
+              name: letsencrypt-prod-key
+            solvers:
+              - dns01:
+                  cloudflare:
+                    apiTokenSecretRef:
+                      name: cloudflare-api-token
+                      key: api-token
+  YAML
+  ]
+
+  depends_on = [kubernetes_secret.cloudflare_api_token]
 }
 
 # =============================================================================
@@ -233,19 +281,19 @@ resource "helm_release" "traefik" {
     value = "internet-facing"
   }
 
-  # HTTP -> HTTPS redirect permanente
+  # HTTP -> HTTPS redirect (Traefik chart v39+ schema)
   set {
-    name  = "ports.web.redirections.entryPoint.to"
+    name  = "ports.web.http.redirections.entryPoint.to"
     value = "websecure"
   }
 
   set {
-    name  = "ports.web.redirections.entryPoint.scheme"
+    name  = "ports.web.http.redirections.entryPoint.scheme"
     value = "https"
   }
 
   set {
-    name  = "ports.web.redirections.entryPoint.permanent"
+    name  = "ports.web.http.redirections.entryPoint.permanent"
     value = "true"
   }
 
@@ -303,51 +351,6 @@ resource "helm_release" "argocd" {
 # cert-manager: Cloudflare secret + ClusterIssuer
 # =============================================================================
 
-resource "kubernetes_secret" "cloudflare_api_token" {
-  metadata {
-    name      = "cloudflare-api-token"
-    namespace = "cert-manager"
-  }
-
-  data = {
-    "api-token" = var.cloudflare_api_token
-  }
-
-  type = "Opaque"
-
-  depends_on = [helm_release.cert_manager]
-}
-
-resource "kubernetes_manifest" "cluster_issuer" {
-  manifest = {
-    apiVersion = "cert-manager.io/v1"
-    kind       = "ClusterIssuer"
-    metadata = {
-      name = "letsencrypt-prod"
-    }
-    spec = {
-      acme = {
-        server = "https://acme-v02.api.letsencrypt.org/directory"
-        email  = "admin@vinny.dev.br"
-        privateKeySecretRef = {
-          name = "letsencrypt-prod-key"
-        }
-        solvers = [{
-          dns01 = {
-            cloudflare = {
-              apiTokenSecretRef = {
-                name = "cloudflare-api-token"
-                key  = "api-token"
-              }
-            }
-          }
-        }]
-      }
-    }
-  }
-
-  depends_on = [kubernetes_secret.cloudflare_api_token]
-}
 
 # =============================================================================
 # Certificates (Let's Encrypt via DNS-01 Cloudflare)
@@ -371,7 +374,7 @@ resource "kubernetes_manifest" "cert_argocd" {
     }
   }
 
-  depends_on = [kubernetes_manifest.cluster_issuer, helm_release.argocd]
+  depends_on = [helm_release.cert_manager, helm_release.argocd]
 }
 
 resource "kubernetes_manifest" "cert_whoami" {
@@ -392,7 +395,7 @@ resource "kubernetes_manifest" "cert_whoami" {
     }
   }
 
-  depends_on = [kubernetes_manifest.cluster_issuer, kubernetes_namespace.whoami]
+  depends_on = [helm_release.cert_manager, kubernetes_namespace.whoami]
 }
 
 # =============================================================================
@@ -409,7 +412,7 @@ data "kubernetes_service" "traefik" {
 }
 
 module "k3s_domain" {
-  source             = "../../../../../../../modules/cloudflare/domain"
+  source             = "../../../../../../../atoms/cloudflare/domain"
   cloudflare_zone_id = var.cloudflare_zone_id
   dns = {
     name    = "k3s"
@@ -420,7 +423,7 @@ module "k3s_domain" {
 }
 
 module "argocd_domain" {
-  source             = "../../../../../../../modules/cloudflare/domain"
+  source             = "../../../../../../../atoms/cloudflare/domain"
   cloudflare_zone_id = var.cloudflare_zone_id
   dns = {
     name    = "argocd-k3s"
