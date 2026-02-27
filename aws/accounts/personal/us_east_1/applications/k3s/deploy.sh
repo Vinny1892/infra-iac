@@ -5,6 +5,15 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CLUSTER_DIR="$SCRIPT_DIR/cluster"
 HELMS_DIR="$SCRIPT_DIR/helms"
 
+# Carrega tokens e AWS profile via função definida no rc do shell
+# shellcheck source=/dev/null
+if [[ "${SHELL}" == */zsh ]]; then
+  source ~/.zshrc
+else
+  source ~/.bashrc
+fi
+load_tf_vinny_root
+
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -29,7 +38,7 @@ check_prerequisites() {
   fi
 
   if [[ -z "${CLOUDFLARE_API_TOKEN:-}" ]]; then
-    warn "CLOUDFLARE_API_TOKEN not set. Cloudflare DNS record will fail."
+    warn "CLOUDFLARE_API_TOKEN not set. Cloudflare DNS records will fail."
   fi
 
   log "All prerequisites met."
@@ -48,7 +57,7 @@ deploy_cluster() {
 wait_for_k3s() {
   log "=== Step 2/5: Waiting for K3s bootstrap ==="
 
-  local max_attempts=60
+  local max_attempts=120
   local attempt=0
 
   log "Waiting for kubeconfig in SSM Parameter Store..."
@@ -69,7 +78,7 @@ wait_for_k3s() {
   done
 
   if [[ $attempt -ge $max_attempts ]]; then
-    err "Timeout waiting for kubeconfig in SSM after $((max_attempts * 10))s."
+    err "Timeout waiting for kubeconfig in SSM after $((max_attempts * 10))s. (RDS leva ~5-10min para ficar pronto)"
     err "Check EC2 instance user_data logs: /var/log/cloud-init-output.log"
     exit 1
   fi
@@ -143,10 +152,23 @@ deploy_helms() {
   log "=== Step 4/5: Deploying Helm releases (LB Controller, Traefik, ArgoCD) ==="
   cd "$HELMS_DIR"
 
-  # Reusa o token Cloudflare já carregado no ambiente
-  export TF_VAR_cloudflare_api_token="${CLOUDFLARE_API_TOKEN:-}"
+  export TF_VAR_cloudflare_api_token="$CLOUDFLARE_API_TOKEN"
+  export TF_VAR_cloudflare_zone_id="$CLOUDFLARE_ZONE_ID"
 
   terragrunt init
+
+  # Stage 1: instala os Helm charts que registram as CRDs (cert-manager, traefik, argocd)
+  # O kubernetes_manifest valida o schema no plan-time, então as CRDs precisam existir antes
+  log "Stage 1: Installing Helm charts (registers CRDs)..."
+  terragrunt apply -auto-approve \
+    -target=helm_release.cert_manager \
+    -target=helm_release.pod_identity_webhook \
+    -target=helm_release.aws_lb_controller \
+    -target=helm_release.traefik \
+    -target=helm_release.argocd
+
+  # Stage 2: aplica todos os recursos que dependem das CRDs instaladas
+  log "Stage 2: Applying CRD-based resources (ClusterIssuer, Certificates, IngressRoutes)..."
   terragrunt apply -auto-approve
 
   log "Helm releases deployed."
@@ -231,8 +253,12 @@ main() {
       verify
       ;;
     destroy)
-      warn "Destroying in reverse order..."
+      check_prerequisites
+      warn "=== Step 1/3: Pre-destroy cleanup (K8s-spawned resources) ==="
+      "$SCRIPT_DIR/pre-destroy.sh"
+      warn "=== Step 2/3: Destroying Helm releases ==="
       cd "$HELMS_DIR"  && terragrunt destroy -auto-approve || true
+      warn "=== Step 3/3: Destroying cluster infrastructure ==="
       cd "$CLUSTER_DIR" && terragrunt destroy -auto-approve
       log "Destroyed."
       ;;
