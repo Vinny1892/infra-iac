@@ -121,6 +121,36 @@ All state stored in S3 with DynamoDB locking (configured in `root.hcl`):
 - **GCP cluster-teste**: kubernetes provider configured locally (depends on module output)
 - **Postgres**: Cross-provider unit (AWS + Cloudflare)
 
+### Credentials & Environment Setup
+
+Before running any `terragrunt` or `aws` command locally, load the required env vars from `~/.bashrc`:
+
+```bash
+load_tf_vinny_root   # sets AWS_PROFILE=personal + CLOUDFLARE_API_TOKEN
+```
+
+This function is defined in `~/.bashrc`. Without it, provider auth will fail for AWS and Cloudflare.
+
+### K3s Cluster Lifecycle
+
+Destroy order (resources created outside Terraform must be cleaned first):
+
+```bash
+# 1. Pre-destroy: clean up K8s-managed AWS resources (NLBs, TGs, SGs, SSM, OIDC bucket)
+cd aws/accounts/personal/us_east_1 && bash applications/k3s/pre-destroy.sh
+
+# 2. Destroy Helm releases
+cd aws/accounts/personal/us_east_1/applications/k3s/helms && terragrunt destroy --auto-approve
+
+# 3. Destroy cluster infra (ASG, NLB, RDS, IAM, OIDC, S3)
+cd aws/accounts/personal/us_east_1/applications/k3s/cluster && terragrunt destroy --auto-approve
+```
+
+Deploy order:
+```bash
+cd aws/accounts/personal/us_east_1 && make k3s-deploy
+```
+
 ### Terraform Version
 
 Requires Terraform >= v1.9.2. Primary AWS provider: `~> 5.0`. OCI provider: `~> 6.0`.
