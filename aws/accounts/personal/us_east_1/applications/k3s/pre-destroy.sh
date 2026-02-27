@@ -1,19 +1,27 @@
 #!/bin/bash
 # Cleans up Kubernetes-spawned resources that Terraform does not manage.
-# Must run before `terragrunt destroy` on the K3s cluster.
+#
+# Run order:
+#   1. bash pre-destroy.sh              <- this script (cleans K8s-managed AWS resources)
+#   2. terragrunt destroy (helms/)      <- removes Helm state + Cloudflare DNS records
+#   3. terragrunt destroy (cluster/)    <- destroys cluster infra
 #
 # Resources cleaned up:
 #   - NLBs created by the AWS Load Balancer Controller (+ their ENIs)
 #   - Target Groups created by the LB Controller
 #   - Security Groups created by the LB Controller
-#   - SSM parameter /k3s/kubeconfig (written by EC2 user_data)
 #   - OIDC S3 bucket objects (belt-and-suspenders; TF has force_destroy=true)
+#
+# NOTE: SSM /k3s/kubeconfig is NOT deleted here — helms/ uses it to configure
+#       the kubernetes provider. It is deleted automatically when the cluster
+#       EC2 instances are terminated.
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CLUSTER_DIR="$SCRIPT_DIR/cluster"
 REGION="us-east-1"
+export AWS_PROFILE="${AWS_PROFILE:-personal}"
 
 GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; NC='\033[0m'
 log()  { echo -e "${GREEN}[PRE-DESTROY]${NC} $*"; }
@@ -79,7 +87,7 @@ delete_k8s_load_balancers() {
 
   log "Waiting for load balancers to be fully deleted (ENIs released)..."
   for arn in "${k8s_arns[@]}"; do
-    aws elbv2 wait load-balancer-deleted \
+    aws elbv2 wait load-balancers-deleted \
       --load-balancer-arns "$arn" --region "$REGION" || true
   done
 
@@ -176,20 +184,6 @@ delete_k8s_security_groups() {
 }
 
 # -----------------------------------------------------------------------------
-# SSM parameter written by EC2 user_data (not managed by Terraform)
-# -----------------------------------------------------------------------------
-delete_ssm_parameter() {
-  log "Deleting SSM parameter /k3s/kubeconfig..."
-  if aws ssm delete-parameter \
-      --name "/k3s/kubeconfig" \
-      --region "$REGION" 2>/dev/null; then
-    log "SSM parameter deleted."
-  else
-    warn "SSM parameter not found (already deleted or never created)."
-  fi
-}
-
-# -----------------------------------------------------------------------------
 # OIDC bucket – empty it so Terraform can delete even if force_destroy fails
 # -----------------------------------------------------------------------------
 empty_oidc_bucket() {
@@ -219,7 +213,6 @@ main() {
   delete_k8s_load_balancers
   delete_k8s_target_groups
   delete_k8s_security_groups
-  delete_ssm_parameter
   empty_oidc_bucket
 
   log "========================================"

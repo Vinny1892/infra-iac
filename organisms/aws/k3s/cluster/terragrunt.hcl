@@ -64,11 +64,6 @@ variable "masters_count" {
   default = 2
 }
 
-variable "rds_password" {
-  type      = string
-  sensitive = true
-  default   = "password"
-}
 
 locals {
   cluster_dns_name = aws_lb.k3s_api_nlb.dns_name
@@ -215,6 +210,19 @@ resource "aws_iam_role_policy" "k3s_s3_oidc" {
       Effect   = "Allow"
       Action   = ["s3:PutObject", "s3:PutObjectAcl"]
       Resource = "$${aws_s3_bucket.oidc.arn}/*"
+    }]
+  })
+}
+
+resource "aws_iam_role_policy" "k3s_rds_secret" {
+  name = "k3s-rds-secret-read"
+  role = aws_iam_role.k3s_node_role.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = ["secretsmanager:GetSecretValue"]
+      Resource = "$${aws_db_instance.k3s_rds.master_user_secret[0].secret_arn}"
     }]
   })
 }
@@ -545,16 +553,16 @@ resource "aws_db_subnet_group" "k3s" {
 }
 
 resource "aws_db_instance" "k3s_rds" {
-  identifier             = "k3s-db"
-  allocated_storage      = 20
-  engine                 = "postgres"
-  instance_class         = "db.t3.micro"
-  username               = "k3sadmin"
-  password               = var.rds_password
-  db_subnet_group_name   = aws_db_subnet_group.k3s.name
-  skip_final_snapshot    = true
-  db_name                = "k3s"
-  vpc_security_group_ids = [aws_security_group.database_sg.id]
+  identifier                  = "k3s-db"
+  allocated_storage           = 20
+  engine                      = "postgres"
+  instance_class              = "db.t3.micro"
+  username                    = "k3sadmin"
+  manage_master_user_password = true
+  db_subnet_group_name        = aws_db_subnet_group.k3s.name
+  skip_final_snapshot         = true
+  db_name                     = "k3s"
+  vpc_security_group_ids      = [aws_security_group.database_sg.id]
 
   tags = {
     Name = "k3s-datastore"
@@ -577,19 +585,19 @@ resource "aws_launch_template" "k3s_master" {
   }
 
   user_data = base64encode(templatefile("${local.scripts_dir}/init-master.tfpl", {
-    token         = var.k3s_token
-    username      = aws_db_instance.k3s_rds.username
-    password      = aws_db_instance.k3s_rds.password
-    hostname      = aws_db_instance.k3s_rds.address
-    port          = aws_db_instance.k3s_rds.port
-    database_name = aws_db_instance.k3s_rds.db_name
-    dns_name      = local.cluster_dns_name
-    oidc_bucket   = aws_s3_bucket.oidc.bucket
+    token          = var.k3s_token
+    username       = aws_db_instance.k3s_rds.username
+    rds_secret_arn = aws_db_instance.k3s_rds.master_user_secret[0].secret_arn
+    hostname       = aws_db_instance.k3s_rds.address
+    port           = aws_db_instance.k3s_rds.port
+    database_name  = aws_db_instance.k3s_rds.db_name
+    dns_name       = local.cluster_dns_name
+    oidc_bucket    = aws_s3_bucket.oidc.bucket
   }))
 
   metadata_options {
     http_endpoint = "enabled"
-    http_tokens   = "optional"
+    http_tokens   = "required"
   }
 
   tag_specifications {
