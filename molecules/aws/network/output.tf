@@ -1,27 +1,27 @@
 output "vpc_id" {
-  value = module.vpc.vpc_id
+  value = aws_vpc.main.id
 }
 
 output "vpc_cidr" {
-  value = module.vpc.vpc_cidr
+  value = aws_vpc.main.cidr_block
 }
 
 output "subnet_private" {
-  value = module.vpc.subnet_private
+  value = aws_subnet.private
 }
 
 output "subnet_public" {
-  value = module.vpc.subnet_public
+  value = aws_subnet.public
 }
 
 output "security_group_id" {
-  value = module.security_group.security_group_id
+  value = aws_security_group.example.id
 }
 
 output "nat_gateway_private_ip" {
-  value = module.vpc.nat_gateway_private_ip
+  value = aws_nat_gateway.nat_gateway.private_ip
 }
 
 output "nat_gateway_public_ip" {
-  value = module.vpc.nat_gateway_public_ip
+  value = aws_nat_gateway.nat_gateway.public_ip
 }

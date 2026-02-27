@@ -196,6 +196,7 @@ resource "helm_release" "pod_identity_webhook" {
   name       = "pod-identity-webhook"
   repository = "https://jkroepke.github.io/helm-charts"
   chart      = "amazon-eks-pod-identity-webhook"
+  version    = "2.6.0"
   namespace  = "kube-system"
   timeout    = 600
   wait       = true
@@ -216,6 +217,7 @@ resource "helm_release" "aws_lb_controller" {
   name       = "aws-load-balancer-controller"
   repository = "https://aws.github.io/eks-charts"
   chart      = "aws-load-balancer-controller"
+  version    = "3.1.0"
   namespace  = "kube-system"
   timeout    = 600
   wait       = true
@@ -261,6 +263,7 @@ resource "helm_release" "traefik" {
   name             = "traefik"
   repository       = "https://traefik.github.io/charts"
   chart            = "traefik"
+  version          = "39.0.2"
   namespace        = "traefik"
   create_namespace = true
   timeout          = 600
@@ -323,6 +326,7 @@ resource "helm_release" "argocd" {
   name             = "argocd"
   repository       = "https://argoproj.github.io/argo-helm"
   chart            = "argo-cd"
+  version          = "9.4.5"
   namespace        = "argocd"
   create_namespace = true
   timeout          = 600
@@ -499,7 +503,7 @@ resource "kubernetes_deployment" "whoami" {
       spec {
         container {
           name  = "whoami"
-          image = "traefik/whoami:latest"
+          image = "traefik/whoami:v1.11.0"
 
           port {
             container_port = 80

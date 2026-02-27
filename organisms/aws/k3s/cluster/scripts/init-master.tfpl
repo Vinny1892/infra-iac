@@ -4,12 +4,25 @@ set -euo pipefail
 OIDC_ISSUER="https://${oidc_bucket}.s3.us-east-1.amazonaws.com"
 
 # Resolve EC2 providerID (necessário para o AWS Load Balancer Controller registrar nós)
-INSTANCE_ID=$(curl -s http://169.254.169.254/latest/meta-data/instance-id)
-AZ=$(curl -s http://169.254.169.254/latest/meta-data/placement/availability-zone)
+# IMDSv1 com retry: IMDS pode não estar disponível imediatamente no boot
+imds_get() {
+  local path="$1"
+  local result=""
+  for i in $(seq 1 15); do
+    result=$(curl -sf --max-time 3 "http://169.254.169.254/latest/meta-data/$path" 2>/dev/null) || true
+    [[ -n "$result" ]] && echo "$result" && return 0
+    sleep 2
+  done
+  echo "ERROR: could not fetch IMDS $path after 15 attempts" >&2
+  return 1
+}
+
+INSTANCE_ID=$(imds_get "instance-id")
+AZ=$(imds_get "placement/availability-zone")
 PROVIDER_ID="aws:///$${AZ}/$${INSTANCE_ID}"
 
 # Install K3s server
-curl -sfL https://get.k3s.io | sh -s - server \
+curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION="v1.35.1+k3s1" sh -s - server \
     --write-kubeconfig-mode 644 \
     --disable=traefik \
     --disable=servicelb \
