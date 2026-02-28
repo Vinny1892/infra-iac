@@ -24,3 +24,7 @@ terragrunt run-all apply
 # Single unit
 cd aws/account/personal/network/vpc && terragrunt apply
 ```
+
+## Documentation
+
+- [K3s Cluster on AWS](aws/accounts/personal/us_east_1/applications/k3s/README.md) — K3s + ArgoCD GitOps setup, deploy/destroy guide, credentials, troubleshooting

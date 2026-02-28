@@ -1,0 +1,21 @@
+provider:
+  name: cloudflare
+
+env:
+  - name: CF_API_TOKEN
+    valueFrom:
+      secretKeyRef:
+        name: cloudflare-api-token
+        key: api-token
+
+sources:
+  - traefik-proxy
+
+domainFilters:
+  - vinny.dev.br
+
+policy: sync
+
+registry: txt
+txtOwnerId: k3s
+txtPrefix: "_externaldns."

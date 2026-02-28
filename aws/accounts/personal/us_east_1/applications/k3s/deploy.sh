@@ -4,15 +4,14 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CLUSTER_DIR="$SCRIPT_DIR/cluster"
 HELMS_DIR="$SCRIPT_DIR/helms"
+ARGOCD_DIR="$SCRIPT_DIR/argocd"
 
-# Carrega tokens e AWS profile via função definida no rc do shell
-# shellcheck source=/dev/null
-if [[ "${SHELL}" == */zsh ]]; then
-  source ~/.zshrc
-else
-  source ~/.bashrc
+# Carrega tokens e AWS profile via load_tf_vinny_root (definida no rc do shell).
+# O .bashrc tem guarda de shell interativo, então usamos bash -i para extrair a função.
+if [[ -z "${AWS_PROFILE:-}" ]] || [[ -z "${CLOUDFLARE_API_TOKEN:-}" ]]; then
+  eval "$(bash -i -c 'declare -f load_tf_vinny_root' 2>/dev/null)"
+  load_tf_vinny_root
 fi
-load_tf_vinny_root
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -31,6 +30,7 @@ check_prerequisites() {
   command -v terraform >/dev/null 2>&1  || missing+=("terraform")
   command -v aws >/dev/null 2>&1        || missing+=("aws")
   command -v kubectl >/dev/null 2>&1    || missing+=("kubectl")
+  command -v yq >/dev/null 2>&1         || missing+=("yq")
 
   if [[ ${#missing[@]} -gt 0 ]]; then
     err "Missing tools: ${missing[*]}"
@@ -38,14 +38,14 @@ check_prerequisites() {
   fi
 
   if [[ -z "${CLOUDFLARE_API_TOKEN:-}" ]]; then
-    warn "CLOUDFLARE_API_TOKEN not set. Cloudflare DNS records will fail."
+    warn "CLOUDFLARE_API_TOKEN not set. Secrets bootstrap will fail."
   fi
 
   log "All prerequisites met."
 }
 
 deploy_cluster() {
-  log "=== Step 1/5: Deploying K3s cluster infrastructure ==="
+  log "=== Step 1/7: Deploying K3s cluster infrastructure ==="
   cd "$CLUSTER_DIR"
 
   terragrunt init
@@ -55,7 +55,7 @@ deploy_cluster() {
 }
 
 wait_for_k3s() {
-  log "=== Step 2/5: Waiting for K3s bootstrap ==="
+  log "=== Step 2/7: Waiting for K3s bootstrap ==="
 
   local max_attempts=120
   local attempt=0
@@ -105,7 +105,7 @@ wait_for_k3s() {
 }
 
 setup_kubeconfig() {
-  log "=== Step 3/5: Setting up local kubeconfig ==="
+  log "=== Step 3/7: Setting up local kubeconfig ==="
 
   local kubeconfig_path="$SCRIPT_DIR/.kubeconfig"
 
@@ -148,34 +148,100 @@ setup_kubeconfig() {
   log "Kubeconfig merged into $kube_config"
 }
 
+generate_values() {
+  log "=== Step 4/7: Generating ArgoCD values from cluster outputs ==="
+  cd "$CLUSTER_DIR"
+
+  local outputs
+  outputs=$(terragrunt output -json)
+
+  local aws_lb_role_arn vpc_id argocd_role_arn
+  aws_lb_role_arn=$(echo "$outputs" | jq -r '.aws_lb_controller_role_arn.value')
+  argocd_role_arn=$(echo "$outputs" | jq -r '.argocd_role_arn.value')
+  vpc_id=$(echo "$outputs" | jq -r '.vpc_id.value')
+
+  log "aws_lb_controller_role_arn: $aws_lb_role_arn"
+  log "argocd_role_arn:            $argocd_role_arn"
+  log "vpc_id:                     $vpc_id"
+
+  # Update aws-lb-controller values
+  local lb_values="$ARGOCD_DIR/values/aws-lb-controller.yaml"
+  yq -i ".serviceAccount.annotations.\"eks.amazonaws.com/role-arn\" = \"$aws_lb_role_arn\"" "$lb_values"
+  yq -i ".vpcId = \"$vpc_id\"" "$lb_values"
+  log "Updated $lb_values"
+
+  # Update argocd values
+  local argocd_values="$ARGOCD_DIR/values/argocd.yaml"
+  yq -i ".server.serviceAccount.annotations.\"eks.amazonaws.com/role-arn\" = \"$argocd_role_arn\"" "$argocd_values"
+  log "Updated $argocd_values"
+
+  log "Values generated. Commit and push these files before deploying ArgoCD apps."
+}
+
 deploy_helms() {
-  log "=== Step 4/5: Deploying Helm releases (LB Controller, Traefik, ArgoCD) ==="
+  log "=== Step 5/7: Deploying ArgoCD seed + secrets bootstrap ==="
   cd "$HELMS_DIR"
 
   export TF_VAR_cloudflare_api_token="$CLOUDFLARE_API_TOKEN"
-  export TF_VAR_cloudflare_zone_id="$CLOUDFLARE_ZONE_ID"
 
   terragrunt init
-
-  # Stage 1: instala os Helm charts que registram as CRDs (cert-manager, traefik, argocd)
-  # O kubernetes_manifest valida o schema no plan-time, então as CRDs precisam existir antes
-  log "Stage 1: Installing Helm charts (registers CRDs)..."
-  terragrunt apply -auto-approve \
-    -target=helm_release.cert_manager \
-    -target=helm_release.pod_identity_webhook \
-    -target=helm_release.aws_lb_controller \
-    -target=helm_release.traefik \
-    -target=helm_release.argocd
-
-  # Stage 2: aplica todos os recursos que dependem das CRDs instaladas
-  log "Stage 2: Applying CRD-based resources (ClusterIssuer, Certificates, IngressRoutes)..."
   terragrunt apply -auto-approve
 
-  log "Helm releases deployed."
+  log "ArgoCD seed + secrets deployed."
+}
+
+deploy_root_app() {
+  log "=== Step 6/7: Deploying ArgoCD App of Apps ==="
+
+  kubectl apply -f "$ARGOCD_DIR/root-app.yaml"
+
+  log "Root app applied. Waiting for ArgoCD to sync all applications..."
+
+  wait_for_sync
+}
+
+wait_for_sync() {
+  local max_attempts=60
+  local attempt=0
+  local expected_apps=8
+
+  while [[ $attempt -lt $max_attempts ]]; do
+    local synced_healthy
+    synced_healthy=$(kubectl get applications -n argocd \
+      --no-headers 2>/dev/null \
+      | grep -c "Synced.*Healthy" || true)
+
+    local total
+    total=$(kubectl get applications -n argocd \
+      --no-headers 2>/dev/null \
+      | wc -l | tr -d ' ')
+
+    log "Applications synced/healthy: $synced_healthy / $total (expecting $expected_apps + root)"
+
+    # expected_apps child apps + 1 root app = expected_apps + 1
+    if [[ $synced_healthy -ge $((expected_apps + 1)) ]]; then
+      log "All applications are Synced and Healthy!"
+      return 0
+    fi
+
+    # Show status of non-healthy apps
+    kubectl get applications -n argocd --no-headers 2>/dev/null \
+      | grep -v "Synced.*Healthy" || true
+
+    attempt=$((attempt + 1))
+    sleep 15
+  done
+
+  warn "Timeout waiting for all apps to sync. Check: kubectl -n argocd get applications"
+  kubectl get applications -n argocd 2>/dev/null || true
+  return 1
 }
 
 verify() {
-  log "=== Step 5/5: Verification ==="
+  log "=== Step 7/7: Verification ==="
+
+  log "Checking ArgoCD Applications..."
+  kubectl get applications -n argocd
 
   log "Checking AWS Load Balancer Controller..."
   kubectl -n kube-system get pods -l app.kubernetes.io/name=aws-load-balancer-controller --no-headers
@@ -186,6 +252,9 @@ verify() {
   log "Checking ArgoCD..."
   kubectl -n argocd get pods --no-headers
 
+  log "Checking ExternalDNS..."
+  kubectl -n external-dns get pods --no-headers
+
   log "Checking Traefik NLB service..."
   local traefik_lb
   traefik_lb=$(kubectl -n traefik get svc traefik -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
@@ -195,6 +264,9 @@ verify() {
   else
     warn "Traefik NLB not yet assigned. It may take a few minutes."
   fi
+
+  log "Checking Certificates..."
+  kubectl get certificates -A --no-headers 2>/dev/null || warn "No certificates found yet."
 
   log "Checking IngressRoutes..."
   kubectl get ingressroute -A --no-headers 2>/dev/null || warn "IngressRoute CRD not found yet."
@@ -233,7 +305,9 @@ main() {
       deploy_cluster
       wait_for_k3s
       setup_kubeconfig
+      generate_values
       deploy_helms
+      deploy_root_app
       verify
       ;;
     cluster-only)
@@ -246,7 +320,12 @@ main() {
       check_prerequisites
       setup_kubeconfig
       deploy_helms
+      deploy_root_app
       verify
+      ;;
+    generate-values)
+      check_prerequisites
+      generate_values
       ;;
     verify)
       setup_kubeconfig
@@ -254,16 +333,20 @@ main() {
       ;;
     destroy)
       check_prerequisites
-      warn "=== Step 1/3: Pre-destroy cleanup (K8s-spawned resources) ==="
+      warn "=== Step 1/4: Deleting ArgoCD Applications ==="
+      kubectl delete applications -n argocd --all --wait=true 2>/dev/null || warn "No ArgoCD applications found or cluster unreachable."
+      log "Waiting 30s for controllers to clean up resources..."
+      sleep 30
+      warn "=== Step 2/4: Pre-destroy cleanup (K8s-spawned AWS resources) ==="
       "$SCRIPT_DIR/pre-destroy.sh"
-      warn "=== Step 2/3: Destroying Helm releases ==="
+      warn "=== Step 3/4: Destroying Helm releases (ArgoCD seed + secrets) ==="
       cd "$HELMS_DIR"  && terragrunt destroy -auto-approve || true
-      warn "=== Step 3/3: Destroying cluster infrastructure ==="
+      warn "=== Step 4/4: Destroying cluster infrastructure ==="
       cd "$CLUSTER_DIR" && terragrunt destroy -auto-approve
       log "Destroyed."
       ;;
     *)
-      echo "Usage: $0 {deploy|cluster-only|helms-only|verify|destroy}"
+      echo "Usage: $0 {deploy|cluster-only|helms-only|generate-values|verify|destroy}"
       exit 1
       ;;
   esac
