@@ -109,7 +109,7 @@ kubectl -n argocd label secret infra-iac-repo argocd.argoproj.io/secret-type=rep
 | Credencial              | Onde e configurada                | Onde e usada                                    | Motivo                                                     |
 |-------------------------|-----------------------------------|-------------------------------------------------|------------------------------------------------------------|
 | `AWS_PROFILE=personal`  | `~/.aws/credentials`             | Terraform, AWS CLI, deploy.sh                   | Autenticacao com a AWS para criar/gerenciar recursos       |
-| `CLOUDFLARE_API_TOKEN`  | `~/.bashrc` (load_tf_vinny_root) | Terraform (`TF_VAR_cloudflare_api_token`)       | Criacao de K8s secrets para cert-manager e ExternalDNS     |
+| `CLOUDFLARE_API_TOKEN`  | Variavel de ambiente             | Terraform (`TF_VAR_cloudflare_api_token`)       | Criacao de K8s secrets para cert-manager e ExternalDNS     |
 | Kubeconfig              | SSM `/k3s/kubeconfig`            | Terraform providers (helm/kubernetes), kubectl  | Acesso ao cluster K3s (gerado automaticamente pelo master) |
 | RDS password            | AWS Secrets Manager (gerenciado) | K3s datastore (recuperado no boot da EC2)       | Conexao K3s → PostgreSQL (nunca em plain-text no TF state) |
 | Let's Encrypt key       | K8s Secret `letsencrypt-prod-key`| cert-manager                                    | Chave privada ACME para emitir certificados TLS            |
@@ -117,20 +117,16 @@ kubectl -n argocd label secret infra-iac-repo argocd.argoproj.io/secret-type=rep
 
 ### Como carregar as credenciais
 
-Todas as credenciais locais sao carregadas pela funcao `load_tf_vinny_root` definida em `~/.bashrc`:
+Antes de rodar qualquer comando, as seguintes variaveis de ambiente precisam estar setadas:
 
 ```bash
-# Carrega AWS_PROFILE=personal e CLOUDFLARE_API_TOKEN
-load_tf_vinny_root
+export AWS_PROFILE=personal
+export CLOUDFLARE_API_TOKEN="<seu-token-cloudflare>"
 ```
 
-O `deploy.sh` chama essa funcao automaticamente se as variaveis nao estiverem setadas. Caso queira rodar comandos manuais:
+O `deploy.sh` tenta carrega-las automaticamente se nao estiverem setadas. Para verificar:
 
 ```bash
-# Carregar credenciais
-load_tf_vinny_root
-
-# Verificar
 echo $AWS_PROFILE            # → personal
 echo $CLOUDFLARE_API_TOKEN   # → cfp_... (token da API Cloudflare)
 aws sts get-caller-identity  # → confirma acesso AWS
@@ -210,7 +206,8 @@ Se preferir executar passo a passo:
 
 ```bash
 # 1. Carregar credenciais
-load_tf_vinny_root
+export AWS_PROFILE=personal
+export CLOUDFLARE_API_TOKEN="<seu-token>"
 
 # 2. Deploy da infraestrutura
 cd cluster/
