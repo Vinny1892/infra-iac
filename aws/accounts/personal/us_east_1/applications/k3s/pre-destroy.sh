@@ -1,10 +1,11 @@
 #!/bin/bash
 # Cleans up Kubernetes-spawned resources that Terraform does not manage.
 #
-# Run order:
-#   1. bash pre-destroy.sh              <- this script (cleans K8s-managed AWS resources)
-#   2. terragrunt destroy (helms/)      <- removes Helm state + Cloudflare DNS records
-#   3. terragrunt destroy (cluster/)    <- destroys cluster infra
+# Run order (called by deploy.sh destroy):
+#   1. kubectl delete applications -n argocd --all  <- removes ArgoCD-managed resources
+#   2. bash pre-destroy.sh              <- this script (cleans K8s-managed AWS resources)
+#   3. terragrunt destroy (helms/)      <- removes ArgoCD seed + secrets
+#   4. terragrunt destroy (cluster/)    <- destroys cluster infra
 #
 # Resources cleaned up:
 #   - NLBs created by the AWS Load Balancer Controller (+ their ENIs)
