@@ -22,6 +22,10 @@ terraform {
       source  = "hashicorp/kubernetes"
       version = "~> 2.0"
     }
+    github = {
+      source  = "integrations/github"
+      version = "~> 6.0"
+    }
   }
 }
 
@@ -34,6 +38,10 @@ provider "aws" {
       account     = "personal"
     }
   }
+}
+
+provider "github" {
+  owner = var.github_owner
 }
 EOF
 }
@@ -48,7 +56,10 @@ dependency "k3s_cluster" {
 }
 
 inputs = {
-  argocd_role_arn = dependency.k3s_cluster.outputs.argocd_role_arn
+  argocd_role_arn            = dependency.k3s_cluster.outputs.argocd_role_arn
+  github_owner               = get_env("GITHUB_OWNER", "")
+  github_app_id              = get_env("GITHUB_APP_ID", "")
+  github_app_installation_id = get_env("GITHUB_APP_INSTALL_ID", "")
 }
 
 generate "k3s_provider" {
@@ -94,6 +105,26 @@ variable "cloudflare_api_token" {
   type      = string
   sensitive = true
   default   = ""
+}
+
+variable "github_owner" {
+  type = string
+}
+
+variable "github_app_id" {
+  type = string
+}
+
+variable "github_app_installation_id" {
+  type = string
+}
+
+# =============================================================================
+# GitHub App Key Generation
+# =============================================================================
+
+resource "github_app_private_key" "vega" {
+  app_id = var.github_app_id
 }
 
 # =============================================================================
@@ -163,14 +194,40 @@ resource "helm_release" "argocd" {
 
   # TLS terminated at Traefik — ArgoCD serves plain HTTP
   set {
-    name  = "configs.params.server\\.insecure"
+    name  = "configs.params.server\\\\.insecure"
     value = "true"
   }
 
   set {
-    name  = "server.serviceAccount.annotations.eks\\.amazonaws\\.com/role-arn"
+    name  = "server.serviceAccount.annotations.eks\\\\.amazonaws\\\\.com/role-arn"
     value = var.argocd_role_arn
   }
+}
+
+# =============================================================================
+# ArgoCD Repository Configuration (via Secret)
+# =============================================================================
+
+resource "kubernetes_secret" "argocd_repo_vega" {
+  metadata {
+    name      = "repo-vega-private"
+    namespace = "argocd"
+    labels = {
+      "argocd.argoproj.io/secret-type" = "repository"
+    }
+  }
+
+  type = "Opaque"
+
+  data = {
+    type                    = "git"
+    url                     = "https://github.com/$\{var.github_owner}"
+    githubAppID             = var.github_app_id
+    githubAppInstallationID = var.github_app_installation_id
+    githubAppPrivateKey     = github_app_private_key.vega.private_key
+  }
+
+  depends_on = [helm_release.argocd]
 }
 EOF
 }

@@ -43,13 +43,13 @@ EOF
 }
 
 inputs = {
-  project      = "engaged-proxy-273800"
-  region       = "us-central1"
-  cluster_name = "gke-test-cluster"
-  location     = "us-central1-a"
-  network_name = "vpc-gke"
-  subnet_name  = "my-subnet"
-  subnet_cidr  = "10.50.0.0/24"
+  project         = "engaged-proxy-273800"
+  region          = "us-central1"
+  cluster_name    = "gke-test-cluster"
+  location        = "us-central1-a"
+  network_name    = "vpc-gke"
+  subnet_name     = "my-subnet"
+  subnet_cidr     = "10.50.0.0/24"
   number_of_nodes = 3
-  machine_type = "e2-medium"
+  machine_type    = "e2-medium"
 }
