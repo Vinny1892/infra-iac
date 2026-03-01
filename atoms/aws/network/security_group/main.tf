@@ -4,7 +4,7 @@ variable "vpc_id" {}
 resource "aws_security_group" "example" {
   # ... other configuration ...
   description = "seila"
-  vpc_id = var.vpc_id
+  vpc_id      = var.vpc_id
 
 
   egress {
@@ -12,7 +12,7 @@ resource "aws_security_group" "example" {
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
-     cidr_blocks      = ["0.0.0.0/0"]
+    cidr_blocks = ["0.0.0.0/0"]
   }
 
   ingress {
@@ -20,7 +20,7 @@ resource "aws_security_group" "example" {
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
-     cidr_blocks      = ["0.0.0.0/0"]
+    cidr_blocks = ["0.0.0.0/0"]
   }
   tags = {
     Name = "securitygroupzinho"

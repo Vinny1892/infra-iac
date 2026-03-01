@@ -2,8 +2,8 @@ data "google_client_config" "default" {}
 
 
 resource "google_container_cluster" "cluster" {
-  name     = var.cluster_name
-  location = var.location
+  name                = var.cluster_name
+  location            = var.location
   deletion_protection = false
 
   workload_identity_config {
@@ -11,13 +11,13 @@ resource "google_container_cluster" "cluster" {
   }
   private_cluster_config {
     enable_private_endpoint = false
-    enable_private_nodes = false
+    enable_private_nodes    = false
   }
 
   remove_default_node_pool = true
   initial_node_count       = 1
-  network = var.network
-  subnetwork = var.subnetwork
+  network                  = var.network
+  subnetwork               = var.subnetwork
 }
 
 
@@ -28,9 +28,9 @@ resource "google_container_node_pool" "primary_preemptible_nodes" {
   node_count = var.number_of_nodes
 
   node_config {
-    preemptible   = var.preemptible
-    machine_type  = var.machine_type
-    image_type    = "COS_CONTAINERD" # ou "UBUNTU_CONTAINERD", "COS", etc.
+    preemptible     = var.preemptible
+    machine_type    = var.machine_type
+    image_type      = "COS_CONTAINERD" # ou "UBUNTU_CONTAINERD", "COS", etc.
     service_account = var.service_account_email
     oauth_scopes = [
       "https://www.googleapis.com/auth/cloud-platform"

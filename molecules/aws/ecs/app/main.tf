@@ -44,11 +44,11 @@ module "service" {
     dns_app_name = var.dns_app_name
     dns_id       = local.namespace_id
   }
-  vpc_id          = var.vpc_id
-  service_name    = var.service_name
-  task_arn        = module.task.task_arn
-  security_groups = var.security_groups
-  subnets         = var.subnets
+  vpc_id           = var.vpc_id
+  service_name     = var.service_name
+  task_arn         = module.task.task_arn
+  security_groups  = var.security_groups
+  subnets          = var.subnets
   lb_configuration = var.lb_configuration
 
   depends_on = [module.task]

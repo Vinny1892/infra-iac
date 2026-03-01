@@ -19,6 +19,6 @@ resource "aws_route53_vpc_association_authorization" "authorization" {
 
 resource "aws_route53_zone_association" "zone_association" {
   provider = aws.alternative
-  vpc_id  = aws_route53_vpc_association_authorization.authorization.vpc_id
-  zone_id = aws_route53_vpc_association_authorization.authorization.zone_id
+  vpc_id   = aws_route53_vpc_association_authorization.authorization.vpc_id
+  zone_id  = aws_route53_vpc_association_authorization.authorization.zone_id
 }

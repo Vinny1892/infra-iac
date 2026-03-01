@@ -1,9 +1,3 @@
-variable "region" {
-  description = "A região AWS para o cluster EKS"
-  type        = string
-  default     = "us-east-1"
-}
-
 variable "cluster_name" {
   description = "Nome do cluster EKS"
   type        = string
@@ -19,17 +13,6 @@ variable "cluster_version" {
 variable "subnet_ids" {
   description = "Lista de subnets nas quais o cluster EKS será criado"
   type        = list(string)
-}
-
-variable "public_subnet_id" {
-  description = "Subnet pública para lançar os workers (instâncias EC2)"
-  type        = string
-}
-
-variable "worker_instance_type" {
-  description = "Tipo de instância para os nós EKS"
-  type        = string
-  default     = "t3.medium"
 }
 
 variable "desired_capacity" {
@@ -48,12 +31,6 @@ variable "min_capacity" {
   description = "Capacidade mínima do grupo de nós EKS"
   type        = number
   default     = 1
-}
-
-variable "target_group_arns" {
-  description = "ARNs dos target groups para os workers do EKS"
-  type        = list(string)
-  default     = []
 }
 
 variable "max_pods_per_node" {

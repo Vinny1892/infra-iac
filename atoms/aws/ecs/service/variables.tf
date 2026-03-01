@@ -14,14 +14,12 @@ variable "security_groups" {}
 
 variable "subnets" {}
 
-variable "vpc_id" {}
-
 variable "service_name" {}
 
 variable "internal_dns" {
   type = object({
-      dns_app_name = string
-      dns_id = string
+    dns_app_name = string
+    dns_id       = string
   })
 }
 
@@ -29,14 +27,14 @@ variable "lb_configuration" {
 
   type = object({
     target_group_arn = string
-    container_name = string
-    container_port = number
+    container_name   = string
+    container_port   = number
   })
 
   default = {
     target_group_arn = ""
-    container_name = ""
-    container_port = 0
+    container_name   = ""
+    container_port   = 0
   }
 }
 

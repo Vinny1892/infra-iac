@@ -1,2 +1,4 @@
 [tools]
 terragrunt = "latest"
+go = "1.22"
+tflint = "latest"

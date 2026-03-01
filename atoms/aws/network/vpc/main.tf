@@ -22,18 +22,13 @@ variable "private_subnet_cidr_blocks" {
   description = "CIDR blocks for private subnets"
 }
 
-variable "region" {
-  description = "AWS region"
-}
-
-
 variable "availability_zone" {
 
 }
 resource "aws_vpc" "main" {
   enable_dns_hostnames = true
-  enable_dns_support = true
-  cidr_block = var.vpc_cidr_block
+  enable_dns_support   = true
+  cidr_block           = var.vpc_cidr_block
   tags = {
     Name = "MainVPC"
   }
@@ -44,7 +39,7 @@ resource "aws_subnet" "public" {
 
   cidr_block        = var.public_subnet_cidr_blocks[count.index]
   vpc_id            = aws_vpc.main.id
-  availability_zone =  var.availability_zone[count.index] # AZ naming convention
+  availability_zone = var.availability_zone[count.index] # AZ naming convention
 
   map_public_ip_on_launch = true
 
@@ -59,7 +54,7 @@ resource "aws_subnet" "private" {
 
   cidr_block        = var.private_subnet_cidr_blocks[count.index]
   vpc_id            = aws_vpc.main.id
-  availability_zone =  var.availability_zone[count.index] # AZ naming convention
+  availability_zone = var.availability_zone[count.index] # AZ naming convention
 
   tags = {
     Name = "PrivateSubnet-${count.index + 1}"
@@ -88,7 +83,7 @@ resource "aws_route_table" "r" {
 
 #route table connect to public subnet
 resource "aws_route_table_association" "a" {
-  count = length(var.public_subnet_cidr_blocks)
+  count          = length(var.public_subnet_cidr_blocks)
   subnet_id      = aws_subnet.public[count.index].id
   route_table_id = aws_route_table.r.id
 }
@@ -100,14 +95,14 @@ resource "aws_nat_gateway" "nat_gateway" {
 }
 
 resource "aws_eip" "nat-gateway-eip" {
- domain = "vpc"
+  domain = "vpc"
 }
 
 resource "aws_route_table" "nat_gateway_rt" {
   vpc_id = aws_vpc.main.id
 
   route {
-    cidr_block = "0.0.0.0/0"
+    cidr_block     = "0.0.0.0/0"
     nat_gateway_id = aws_nat_gateway.nat_gateway.id
   }
 
@@ -119,11 +114,11 @@ resource "aws_route_table" "nat_gateway_rt" {
 
 
 resource "aws_route_table_association" "nat_gateway_rt_assoc" {
-    count = length(var.private_subnet_cidr_blocks)
+  count = length(var.private_subnet_cidr_blocks)
 
-#  Private Subnet ID for adding this route table to the DHCP server of Private subnet!
-  subnet_id      = aws_subnet.private[count.index].id
+  #  Private Subnet ID for adding this route table to the DHCP server of Private subnet!
+  subnet_id = aws_subnet.private[count.index].id
 
-# Route Table ID
+  # Route Table ID
   route_table_id = aws_route_table.nat_gateway_rt.id
 }
