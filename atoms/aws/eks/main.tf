@@ -20,12 +20,12 @@ resource "aws_iam_role" "test_role" {
 resource "aws_iam_policy" "parameter_store_policy" {
   name        = "ParameterStoreReadPolicy"
   description = "Permissões de leitura para o AWS Systems Manager Parameter Store"
-  policy      = jsonencode({
+  policy = jsonencode({
     Version = "2012-10-17",
     Statement = [
       {
-        Effect   = "Allow",
-        Action   = [
+        Effect = "Allow",
+        Action = [
           "ssm:GetParameter",
           "ssm:GetParameters",
           "ssm:GetParametersByPath"
@@ -73,7 +73,7 @@ resource "aws_eks_cluster" "eks_cluster" {
 
 
   vpc_config {
-    subnet_ids = var.subnet_ids
+    subnet_ids              = var.subnet_ids
     endpoint_private_access = true
     endpoint_public_access  = true
   }
@@ -95,7 +95,7 @@ resource "aws_iam_role_policy_attachment" "eks_worker_AmazonEKSWorkerNodePolicy"
 
 resource "aws_iam_role_policy_attachment" "example-AmazonEKS_CNI_Policy" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy"
-  role       =  aws_iam_role.eks_worker_role.id
+  role       = aws_iam_role.eks_worker_role.id
 }
 
 resource "aws_iam_role_policy_attachment" "eks_worker_AmazonEC2ContainerRegistryReadOnly" {
@@ -162,11 +162,11 @@ resource "aws_eks_node_group" "node_group" {
 }
 
 
-resource "aws_eks_addon" "addon1"{
-  cluster_name = aws_eks_cluster.eks_cluster.name
-  addon_name = "vpc-cni"
+resource "aws_eks_addon" "addon1" {
+  cluster_name  = aws_eks_cluster.eks_cluster.name
+  addon_name    = "vpc-cni"
   addon_version = "v1.18.3-eksbuild.3"
-  
+
   configuration_values = jsonencode({
     env = {
       ENABLE_PREFIX_DELEGATION = "true"
@@ -174,10 +174,10 @@ resource "aws_eks_addon" "addon1"{
     }
   })
 }
-resource "aws_eks_addon" "addon3"{
-  cluster_name = aws_eks_cluster.eks_cluster.name
-  addon_name = "eks-pod-identity-agent"
-  addon_version = "v1.3.2-eksbuild.2"
+resource "aws_eks_addon" "addon3" {
+  cluster_name             = aws_eks_cluster.eks_cluster.name
+  addon_name               = "eks-pod-identity-agent"
+  addon_version            = "v1.3.2-eksbuild.2"
   service_account_role_arn = aws_iam_role.test_role.arn
 }
 # IAM role for EBS CSI Driver
@@ -225,7 +225,7 @@ data "tls_certificate" "this" {
 
 
 resource "aws_iam_openid_connect_provider" "eks" {
-  client_id_list = ["sts.amazonaws.com"]
+  client_id_list  = ["sts.amazonaws.com"]
   thumbprint_list = [data.tls_certificate.this.certificates[0].sha1_fingerprint]
-  url = aws_eks_cluster.eks_cluster.identity[0].oidc[0].issuer
+  url             = aws_eks_cluster.eks_cluster.identity[0].oidc[0].issuer
 }

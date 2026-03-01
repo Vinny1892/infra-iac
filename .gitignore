@@ -12,3 +12,8 @@
 aws/**/*.tf
 gcp/**/*.tf
 oci/**/*.tf
+
+# Test artifacts
+tests/fixtures/**/.terraform/
+tests/fixtures/**/.terraform.lock.hcl
+tests/fixtures/k3s_extracted/

@@ -1,19 +1,13 @@
- variable "ami_id" {
+variable "ami_id" {
   description = "The AMI ID to use for the instance"
   type        = string
-  default     = "ami-0ae1b77caf38c2ca0"  # AMI especificada
+  default     = "ami-0ae1b77caf38c2ca0" # AMI especificada
 }
 
 variable "instance_type" {
   description = "The type of instance to launch"
   type        = string
-  default     = "t2.micro"  # Tipo de instância padrão
-}
-
-variable "key_name" {
-  description = "The name of the SSH key pair to use (optional if using SSM)"
-  type        = string
-  default     = null
+  default     = "t2.micro" # Tipo de instância padrão
 }
 
 variable "subnet_id" {

@@ -18,7 +18,3 @@ variable "availability_zone" {
   type        = list(string)
 }
 
-variable "region" {
-  description = "AWS region"
-  type        = string
-}

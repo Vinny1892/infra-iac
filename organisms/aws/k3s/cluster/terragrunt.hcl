@@ -559,6 +559,7 @@ resource "aws_db_instance" "k3s_rds" {
   instance_class              = "db.t3.micro"
   username                    = "k3sadmin"
   manage_master_user_password = true
+  storage_encrypted           = true
   db_subnet_group_name        = aws_db_subnet_group.k3s.name
   skip_final_snapshot         = true
   db_name                     = "k3s"
@@ -618,7 +619,7 @@ resource "aws_autoscaling_group" "k3s_masters" {
   max_size         = var.masters_count
   desired_capacity = var.masters_count
 
-  vpc_zone_identifier = var.public_subnet_ids
+  vpc_zone_identifier = var.private_subnet_ids
 
   launch_template {
     id      = aws_launch_template.k3s_master.id

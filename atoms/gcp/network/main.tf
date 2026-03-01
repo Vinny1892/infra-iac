@@ -6,7 +6,7 @@ resource "google_compute_network" "vpc_network" {
 
 # Sub-rede associada à VPCgke
 resource "google_compute_subnetwork" "subnet" {
-  for_each = var.subnets
+  for_each      = var.subnets
   name          = each.value.name
   ip_cidr_range = each.value.cidr
   region        = each.value.region

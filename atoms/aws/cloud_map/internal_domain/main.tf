@@ -2,7 +2,7 @@
 
 
 resource "aws_service_discovery_service" "service" {
-  name          =  var.name
+  name = var.name
   dns_config {
     namespace_id = var.namespace_ip
     dns_records {

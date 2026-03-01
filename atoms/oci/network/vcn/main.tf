@@ -54,8 +54,8 @@ resource "oci_core_security_list" "default" {
   }
 
   ingress_security_rules {
-    source   = "0.0.0.0/0"
-    protocol = "all"
+    source    = "0.0.0.0/0"
+    protocol  = "all"
     stateless = false
   }
 }
