@@ -41,14 +41,14 @@ terraform {
 
 inputs = {
   # Service
-  service_name             = "apache-superset_staging"
-  app_replicas             = 0
-  cluster_id               = dependency.ecs_cluster.outputs.cluster_id
-  vpc_id                   = dependency.vpc.outputs.vpc_id
-  security_groups          = [dependency.vpc.outputs.security_group_id]
-  subnets                  = [for s in dependency.vpc.outputs.subnet_public : s.id]
-  dns_app_name             = "apache-superset-staging"
-  namespace_id             = dependency.internal_domain.outputs.namespace_id
+  service_name    = "apache-superset_staging"
+  app_replicas    = 0
+  cluster_id      = dependency.ecs_cluster.outputs.cluster_id
+  vpc_id          = dependency.vpc.outputs.vpc_id
+  security_groups = [dependency.vpc.outputs.security_group_id]
+  subnets         = [for s in dependency.vpc.outputs.subnet_public : s.id]
+  dns_app_name    = "apache-superset-staging"
+  namespace_id    = dependency.internal_domain.outputs.namespace_id
 
   # Task
   task_name          = "apache-superset_staging"
