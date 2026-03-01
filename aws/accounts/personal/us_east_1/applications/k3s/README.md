@@ -14,6 +14,7 @@ Cluster Kubernetes leve (K3s) rodando em EC2 na AWS, com RDS PostgreSQL como dat
 - [Operacoes do Dia-a-dia](#operacoes-do-dia-a-dia)
 - [Troubleshooting](#troubleshooting)
 - [Destruicao](#destruicao)
+- [Testes](#testes)
 - [Versoes](#versoes)
 
 ---
@@ -622,6 +623,32 @@ cd helms/ && terragrunt destroy -auto-approve
 # 4. Destroy cluster
 cd ../cluster/ && terragrunt destroy -auto-approve
 ```
+
+---
+
+## Testes
+
+O organism do K3s possui um teste de validacao unitario (`TestK3sOrganismValidate`) que verifica a sintaxe e os tipos do modulo sem fazer chamadas reais a AWS.
+
+Como o codigo Terraform fica inline no `terragrunt.hcl` (via blocos `generate`), e necessario extrair o fixture antes de rodar:
+
+```bash
+# 1. Extrair o fixture (so precisa rodar uma vez, ou apos mudancas no terragrunt.hcl)
+bash scripts/extract-k3s-fixture.sh
+
+# 2. Rodar o teste
+make test-unit
+# ou isolado:
+cd tests && go test -tags=unit -v -run TestK3sOrganismValidate ./unit/...
+```
+
+Para ver a cobertura geral de testes do projeto:
+
+```bash
+make coverage-report   # gera coverage.html na raiz do repositorio
+```
+
+Para mais detalhes sobre a infraestrutura de testes, fixtures e como criar novos testes, consulte [docs/TESTES.md](../../../../../../docs/TESTES.md).
 
 ---
 
