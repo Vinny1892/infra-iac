@@ -6,6 +6,8 @@ lint-fmt:
 	terraform fmt -check -recursive atoms/ molecules/
 
 lint-tflint:
+	@echo "==> Initializing tflint..."
+	@tflint --init
 	@echo "==> Running tflint on atoms/aws..."
 	@for dir in $$(find atoms/aws -mindepth 1 -maxdepth 3 -type d); do \
 		if ls "$$dir"/*.tf >/dev/null 2>&1; then \
