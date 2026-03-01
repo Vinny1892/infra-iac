@@ -4,7 +4,6 @@ package unit
 
 import (
 	"os"
-	"path/filepath"
 	"testing"
 )
 
