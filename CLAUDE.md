@@ -38,6 +38,17 @@ cd aws/accounts/personal/us_east_1/network/vpc && terragrunt init
 terragrunt graph-dependencies
 ```
 
+### Lint & Test (Makefile targets)
+
+```bash
+make lint            # terraform fmt -check + tflint on atoms/ and molecules/
+make lint-fmt        # terraform fmt check only
+make lint-tflint     # tflint only (uses .tflint.hcl with AWS ruleset)
+
+make test-unit       # Terratest unit tests (mock AWS, no real API calls)
+make coverage-report # Generate coverage.html showing which modules have tests
+```
+
 Ansible/Minecraft testing (from `aws/accounts/personal/us_east_1/applications/ec2/minecraft/minecraft-ansible/`):
 ```bash
 make check    # Verify ansible communication
@@ -52,26 +63,46 @@ make test     # Run molecule tests
 ```
 infra-iac/
 ├── root.hcl                    # Global Terragrunt config (S3 backend defaults)
-├── modules/                    # All reusable Terraform modules
-│   ├── aws/                    # AWS modules (vpc, ecs, ec2, eks, etc.)
-│   ├── gcp/                    # GCP modules (gke, network)
-│   ├── oci/                    # OCI modules (vcn, compute)
-│   └── cloudflare/             # Cloudflare modules (domain, tunnel)
-├── aws/accounts/personal/      # AWS instance layer
+├── atoms/                      # Single-purpose Terraform modules
+│   ├── aws/
+│   │   ├── network/vpc/
+│   │   ├── network/security_group/
+│   │   ├── network/route53_zone_association/
+│   │   ├── cloud_map/create_internal_dns/
+│   │   ├── cloud_map/internal_domain/
+│   │   ├── ecs/cluster/
+│   │   ├── ecs/service/
+│   │   ├── ecs/task/
+│   │   ├── ec2/
+│   │   └── eks/
+│   ├── gcp/  (gke, network)
+│   ├── oci/  (network/vcn)
+│   └── cloudflare/  (domain, tunnel)
+├── molecules/                  # Compositions of atoms
+│   └── aws/
+│       ├── network/            # vpc + security_group
+│       └── ecs/app/            # ecs/service + cloud_map
+├── organisms/                  # Full application stacks
+│   └── aws/k3s/cluster/        # K3s cluster (ASG, NLB, RDS, IAM, OIDC)
+├── aws/accounts/personal/      # AWS Terragrunt instance layer
 │   └── us_east_1/              # Region: us-east-1
-│       ├── _region.hcl         # AWS provider + region config (included by units)
-│       ├── network/vpc/        # VPC + Security Group
-│       ├── internal_domain/    # CloudMap service discovery
-│       ├── ecs_cluster/        # ECS cluster
-│       ├── eks/                # EKS cluster + helms/
-│       └── applications/       # EC2 and ECS application deployments
+│       ├── _region.hcl         # AWS provider + region config
+│       ├── network/vpc/
+│       ├── internal_domain/
+│       ├── ecs_cluster/
+│       ├── eks/
+│       └── applications/       # EC2 and ECS deployments
 ├── gcp/projects/regulus/       # GCP instance layer
-│   ├── _provider.hcl
-│   └── gke/cluster-teste/
 ├── oci/tenancy/regulus/        # OCI instance layer
-│   ├── _provider.hcl
-│   └── us_ashburn_1/
-└── cloudflare/                 # (modules only, no instances)
+├── tests/                      # Terratest unit tests
+│   ├── fixtures/               # One fixture per module (mock provider)
+│   ├── unit/                   # Test files (*_test.go, build tag: unit)
+│   ├── helpers/                # FixturePath() helper
+│   └── cmd/coverage/           # HTML coverage report generator
+├── scripts/                    # Utility scripts (e.g. extract-k3s-fixture.sh)
+├── Makefile                    # lint / test / coverage targets
+├── .tflint.hcl                 # TFLint config (AWS ruleset v0.35.0)
+└── mise.toml                   # Pinned tool versions (terraform, terragrunt, go, tflint)
 ```
 
 ### Terragrunt Configuration Hierarchy
@@ -94,10 +125,12 @@ Managed via Terragrunt `dependency` blocks (automatic ordering with `run-all`):
 
 ### Module Inventory
 
-**AWS** (`modules/aws/`): `network/vpc`, `network/security_group`, `cloud_map/create_internal_dns`, `ecs/cluster`, `ecs/service`, `ecs/task`, `ec2`, `eks`
-**GCP** (`modules/gcp/`): `gke`, `network`
-**OCI** (`modules/oci/`): `network/vcn`, `compute/instance`
-**Cloudflare** (`modules/cloudflare/`): `domain`, `tunnel`
+**Atoms — AWS** (`atoms/aws/`): `network/vpc`, `network/security_group`, `network/route53_zone_association`, `cloud_map/create_internal_dns`, `cloud_map/internal_domain`, `ecs/cluster`, `ecs/service`, `ecs/task`, `ec2`, `eks`
+**Atoms — GCP** (`atoms/gcp/`): `gke`, `network`
+**Atoms — OCI** (`atoms/oci/`): `network/vcn`
+**Atoms — Cloudflare** (`atoms/cloudflare/`): `domain`, `tunnel`
+**Molecules** (`molecules/aws/`): `network`, `ecs/app`
+**Organisms** (`organisms/aws/`): `k3s/cluster`
 
 ### Applications
 
@@ -123,13 +156,14 @@ All state stored in S3 with DynamoDB locking (configured in `root.hcl`):
 
 ### Credentials & Environment Setup
 
-Before running any `terragrunt` or `aws` command locally, load the required env vars from `~/.bashrc`:
+Before running any `terragrunt` or `aws` command locally, export the required environment variables:
 
 ```bash
-load_tf_vinny_root   # sets AWS_PROFILE=personal + CLOUDFLARE_API_TOKEN
+export AWS_PROFILE=personal          # selects the AWS CLI profile for the personal account
+export CLOUDFLARE_API_TOKEN=<token>  # Cloudflare API token (stored in ~/.bashrc)
 ```
 
-This function is defined in `~/.bashrc`. Without it, provider auth will fail for AWS and Cloudflare.
+Without these, provider auth will fail for AWS and Cloudflare. Both are defined in `~/.bashrc` via the `load_tf_vinny_root` shell function as a convenience shortcut.
 
 ### K3s Cluster Lifecycle
 
@@ -150,6 +184,32 @@ Deploy order:
 ```bash
 cd aws/accounts/personal/us_east_1 && make k3s-deploy
 ```
+
+### Testing Infrastructure
+
+Tests live in `tests/` and use **Terratest v0.46.16** (Go). All tests are unit tests — they use a mock AWS provider and never contact real AWS.
+
+**Build tag:** all test files have `//go:build unit`
+
+**Fixture pattern:** each fixture at `tests/fixtures/<name>/` has a mock provider and sources the atom/molecule under test:
+```hcl
+provider "aws" {
+  skip_credentials_validation = true
+  skip_metadata_api_check     = true
+  skip_requesting_account_id  = true
+  access_key = "mock"
+  secret_key = "mock"
+}
+module "vpc" { source = "../../../atoms/aws/network/vpc" ... }
+```
+
+**Test types per module:**
+- **Validate** — calls `terraform.Validate(t, opts)` — checks HCL syntax and types
+- **Plan** — calls `terraform.InitAndPlanAndShowWithStruct(t, opts)` — checks plan structure without applying
+
+**K3s organism test:** the K3s fixture is generated dynamically by `scripts/extract-k3s-fixture.sh` (strips Terragrunt locals, injects mock provider). Run the script once before running `TestK3sOrganismValidate`.
+
+**Coverage report:** `make coverage-report` generates `coverage.html` (gitignored) showing which modules have validate/plan tests.
 
 ### Terraform Version
 
