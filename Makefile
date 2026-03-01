@@ -1,4 +1,4 @@
-.PHONY: lint lint-fmt lint-tflint test test-unit test-integration
+.PHONY: lint lint-fmt lint-tflint test test-unit coverage-report
 
 lint: lint-fmt lint-tflint
 
@@ -25,3 +25,7 @@ test: test-unit
 
 test-unit:
 	cd tests && go test -tags=unit -v -timeout 30m ./unit/...
+
+coverage-report:
+	cd tests && go run ./cmd/coverage/main.go ..
+	@echo "Open coverage.html in your browser"
