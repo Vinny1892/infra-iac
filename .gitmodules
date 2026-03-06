@@ -1,3 +1,4 @@
 [submodule "aws/accounts/personal/us_east_1/applications/ec2/minecraft/minecraft-ansible"]
 	path = aws/accounts/personal/us_east_1/applications/ec2/minecraft/minecraft-ansible
 	url = git@github.com:Vinny1892/minecraft-ansible.git
+	update = none
