@@ -4,22 +4,74 @@ set -euo pipefail
 OIDC_ISSUER="https://${oidc_bucket}.s3.us-east-1.amazonaws.com"
 
 # Resolve EC2 providerID (necessário para o AWS Load Balancer Controller registrar nós)
-INSTANCE_ID=$(curl -s http://169.254.169.254/latest/meta-data/instance-id)
-AZ=$(curl -s http://169.254.169.254/latest/meta-data/placement/availability-zone)
+# IMDSv2: obtém token primeiro, depois usa em todas as chamadas IMDS
+imds_token() {
+  local token=""
+  for i in $(seq 1 15); do
+    token=$(curl -sf -X PUT --max-time 3 \
+      "http://169.254.169.254/latest/api/token" \
+      -H "X-aws-ec2-metadata-token-ttl-seconds: 21600" 2>/dev/null) || true
+    [[ -n "$token" ]] && echo "$token" && return 0
+    sleep 2
+  done
+  echo "ERROR: could not obtain IMDSv2 token after 15 attempts" >&2
+  return 1
+}
+
+IMDS_TOKEN=$(imds_token)
+
+imds_get() {
+  local path="$1"
+  local result=""
+  for i in $(seq 1 15); do
+    result=$(curl -sf --max-time 3 \
+      -H "X-aws-ec2-metadata-token: $IMDS_TOKEN" \
+      "http://169.254.169.254/latest/meta-data/$path" 2>/dev/null) || true
+    [[ -n "$result" ]] && echo "$result" && return 0
+    sleep 2
+  done
+  echo "ERROR: could not fetch IMDS $path after 15 attempts" >&2
+  return 1
+}
+
+INSTANCE_ID=$(imds_get "instance-id")
+AZ=$(imds_get "placement/availability-zone")
 PROVIDER_ID="aws:///$${AZ}/$${INSTANCE_ID}"
 
-# Install K3s server
+# Fetch RDS password from Secrets Manager at runtime (not baked into user_data)
+RDS_SECRET=$(aws secretsmanager get-secret-value \
+  --secret-id "${rds_secret_arn}" \
+  --region us-east-1 \
+  --query SecretString --output text)
+# Extract password from JSON (RDS managed passwords never contain backslash or double-quote)
+RDS_PASSWORD=$(printf '%s' "$RDS_SECRET" | grep -oP '"password"\s*:\s*"\K[^"]+')
+
+# URL-encode password so special chars don't break the DSN parser
+# Uses od (standard coreutils) - no network, no bash brace-expansion constructs
+RDS_PASSWORD_ENCODED=$(printf '%s' "$RDS_PASSWORD" | od -A n -t x1 | tr -d ' \t\n' | sed 's/../%&/g' | tr 'a-f' 'A-F')
+
+# Write DSN to K3s config file — avoids passing it via CLI which would land in
+# k3s.service, where systemd interprets % as unit specifiers and rejects the file
+mkdir -p /etc/rancher/k3s
+cat > /etc/rancher/k3s/config.yaml << K3SCFG
+datastore-endpoint: "postgres://${username}:$${RDS_PASSWORD_ENCODED}@${hostname}:${port}/${database_name}"
+K3SCFG
+
+# Install K3s server (datastore-endpoint intentionally absent from CLI — see config.yaml above)
 curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION="v1.35.1+k3s1" sh -s - server \
-    --write-kubeconfig-mode 644 \
+    --write-kubeconfig-mode 600 \
     --disable=traefik \
     --disable=servicelb \
     --disable-cloud-controller \
     --token '${token}' \
-    --datastore-endpoint='postgres://${username}:${password}@${hostname}:${port}/${database_name}' \
     --tls-san '${dns_name}' \
     --kubelet-arg="provider-id=$${PROVIDER_ID}" \
     --kube-apiserver-arg="--service-account-issuer=$OIDC_ISSUER" \
-    --kube-apiserver-arg="--api-audiences=sts.amazonaws.com"
+    --kube-apiserver-arg="--api-audiences=sts.amazonaws.com" \
+    --kube-apiserver-arg="--audit-log-path=/var/log/k3s-audit.log" \
+    --kube-apiserver-arg="--audit-log-maxage=30" \
+    --kube-apiserver-arg="--audit-log-maxbackup=5" \
+    --kube-apiserver-arg="--audit-log-maxsize=100"
 
 # Wait for K3s to be ready
 until /usr/local/bin/kubectl get nodes 2>/dev/null; do sleep 5; done
