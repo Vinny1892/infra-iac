@@ -2,13 +2,17 @@ include "root" {
   path = find_in_parent_folders("root.hcl")
 }
 
-# Custom provider: AWS + Helm + Kubernetes
+terraform {
+  source = "../../../../../../../organisms/aws/k3s/helms"
+}
+
+# AWS provider — reads kubeconfig from SSM
 generate "provider" {
   path      = "provider.tf"
   if_exists = "overwrite_terragrunt"
   contents  = <<EOF
 terraform {
-  required_version = ">= v1.9.2"
+  required_version = ">= 1.9.2"
   required_providers {
     aws = {
       source  = "hashicorp/aws"
@@ -38,23 +42,7 @@ provider "aws" {
 EOF
 }
 
-dependency "k3s_cluster" {
-  config_path = "../cluster"
-
-  mock_outputs = {
-    argocd_role_arn = "arn:aws:iam::123456789012:role/mock"
-  }
-  mock_outputs_allowed_terraform_commands = ["validate", "plan"]
-}
-
-inputs = {
-  argocd_role_arn            = dependency.k3s_cluster.outputs.argocd_role_arn
-  github_owner               = get_env("GITHUB_OWNER", "")
-  github_app_id              = get_env("GITHUB_APP_ID", "")
-  github_app_installation_id = get_env("GITHUB_APP_INSTALL_ID", "")
-  github_repo_name           = get_env("GITHUB_REPO_NAME", "infra-iac")
-}
-
+# Kubernetes/Helm providers — configured from kubeconfig stored in SSM
 generate "k3s_provider" {
   path      = "k3s_provider.tf"
   if_exists = "overwrite_terragrunt"
@@ -86,141 +74,19 @@ provider "kubernetes" {
 EOF
 }
 
-generate "main" {
-  path      = "main.tf"
-  if_exists = "overwrite_terragrunt"
-  contents  = <<EOF
-variable "argocd_role_arn" {
-  type = string
-}
+dependency "k3s_cluster" {
+  config_path = "../cluster"
 
-variable "cloudflare_api_token" {
-  type      = string
-  sensitive = true
-  default   = ""
-}
-
-variable "github_owner" {
-  type = string
-}
-
-variable "github_app_id" {
-  type = string
-}
-
-variable "github_app_installation_id" {
-  type = string
-}
-
-variable "github_repo_name" {
-  type = string
-}
-
-data "aws_secretsmanager_secret_version" "github_app_private_key" {
-  secret_id = "github-app-private-key"
-}
-
-# =============================================================================
-# Bootstrap: Namespaces + Secrets (created before ArgoCD exists)
-# =============================================================================
-
-resource "kubernetes_namespace" "cert_manager" {
-  metadata {
-    name = "cert-manager"
+  mock_outputs = {
+    argocd_role_arn = "arn:aws:iam::123456789012:role/mock"
   }
+  mock_outputs_allowed_terraform_commands = ["validate", "plan"]
 }
 
-resource "kubernetes_secret" "cloudflare_api_token" {
-  metadata {
-    name      = "cloudflare-api-token"
-    namespace = "cert-manager"
-  }
-
-  data = {
-    "api-token" = var.cloudflare_api_token
-  }
-
-  type = "Opaque"
-
-  depends_on = [kubernetes_namespace.cert_manager]
-}
-
-resource "kubernetes_namespace" "external_dns" {
-  metadata {
-    name = "external-dns"
-  }
-}
-
-resource "kubernetes_secret" "cloudflare_api_token_eds" {
-  metadata {
-    name      = "cloudflare-api-token"
-    namespace = "external-dns"
-  }
-
-  data = {
-    "api-token" = var.cloudflare_api_token
-  }
-
-  type = "Opaque"
-
-  depends_on = [kubernetes_namespace.external_dns]
-}
-
-# =============================================================================
-# ArgoCD — seed install (self-managed instance takes over via App of Apps)
-# =============================================================================
-
-resource "helm_release" "argocd" {
-  name             = "argocd"
-  repository       = "https://argoproj.github.io/argo-helm"
-  chart            = "argo-cd"
-  version          = "9.4.5"
-  namespace        = "argocd"
-  create_namespace = true
-  timeout          = 600
-  wait             = true
-
-  set {
-    name  = "server.service.type"
-    value = "ClusterIP"
-  }
-
-  # TLS terminated at Traefik — ArgoCD serves plain HTTP
-  set {
-    name  = "configs.params.server\\.insecure"
-    value = "true"
-  }
-
-  set {
-    name  = "server.serviceAccount.annotations.eks\\.amazonaws\\.com/role-arn"
-    value = var.argocd_role_arn
-  }
-}
-
-# =============================================================================
-# ArgoCD Repository Configuration (via Secret)
-# =============================================================================
-
-resource "kubernetes_secret" "argocd_repo_vega" {
-  metadata {
-    name      = "repo-vega-private"
-    namespace = "argocd"
-    labels = {
-      "argocd.argoproj.io/secret-type" = "repository"
-    }
-  }
-
-  type = "Opaque"
-
-  data = {
-    type                    = "git"
-    url                     = "https://github.com/$${var.github_owner}/$${var.github_repo_name}"
-    githubAppID             = var.github_app_id
-    githubAppInstallationID = var.github_app_installation_id
-    githubAppPrivateKey     = jsondecode(data.aws_secretsmanager_secret_version.github_app_private_key.secret_string)["github-app-private-key"]
-  }
-
-  depends_on = [helm_release.argocd]
-}
-EOF
+inputs = {
+  argocd_role_arn            = dependency.k3s_cluster.outputs.argocd_role_arn
+  github_owner               = get_env("GITHUB_OWNER", "")
+  github_app_id              = get_env("GITHUB_APP_ID", "")
+  github_app_installation_id = get_env("GITHUB_APP_INSTALL_ID", "")
+  github_repo_name           = get_env("GITHUB_REPO_NAME", "infra-iac")
 }
