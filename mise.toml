@@ -1,4 +1,4 @@
 [tools]
-terragrunt = "latest"
+terragrunt = "0.99.4"
 go = "1.22"
-tflint = "latest"
+tflint = "0.61.0"
