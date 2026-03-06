@@ -11,7 +11,7 @@ spec:
   project: default
   source:
     repoURL: https://github.com/Vinny1892/infra-iac.git
-    targetRevision: main
+    targetRevision: master
     path: aws/accounts/personal/us_east_1/applications/k3s/argocd/manifests/cert-manager-config
   destination:
     server: https://kubernetes.default.svc
