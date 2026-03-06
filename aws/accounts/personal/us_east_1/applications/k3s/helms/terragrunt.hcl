@@ -22,10 +22,6 @@ terraform {
       source  = "hashicorp/kubernetes"
       version = "~> 2.0"
     }
-    github = {
-      source  = "integrations/github"
-      version = "~> 6.0"
-    }
   }
 }
 
@@ -38,10 +34,6 @@ provider "aws" {
       account     = "personal"
     }
   }
-}
-
-provider "github" {
-  owner = var.github_owner
 }
 EOF
 }
@@ -60,6 +52,7 @@ inputs = {
   github_owner               = get_env("GITHUB_OWNER", "")
   github_app_id              = get_env("GITHUB_APP_ID", "")
   github_app_installation_id = get_env("GITHUB_APP_INSTALL_ID", "")
+  github_repo_name           = get_env("GITHUB_REPO_NAME", "infra-iac")
 }
 
 generate "k3s_provider" {
@@ -119,12 +112,12 @@ variable "github_app_installation_id" {
   type = string
 }
 
-# =============================================================================
-# GitHub App Key Generation
-# =============================================================================
+variable "github_repo_name" {
+  type = string
+}
 
-resource "github_app_private_key" "vega" {
-  app_id = var.github_app_id
+data "aws_secretsmanager_secret_version" "github_app_private_key" {
+  secret_id = "github-app-private-key"
 }
 
 # =============================================================================
@@ -194,12 +187,12 @@ resource "helm_release" "argocd" {
 
   # TLS terminated at Traefik — ArgoCD serves plain HTTP
   set {
-    name  = "configs.params.server\\\\.insecure"
+    name  = "configs.params.server\\.insecure"
     value = "true"
   }
 
   set {
-    name  = "server.serviceAccount.annotations.eks\\\\.amazonaws\\\\.com/role-arn"
+    name  = "server.serviceAccount.annotations.eks\\.amazonaws\\.com/role-arn"
     value = var.argocd_role_arn
   }
 }
@@ -221,10 +214,10 @@ resource "kubernetes_secret" "argocd_repo_vega" {
 
   data = {
     type                    = "git"
-    url                     = "https://github.com/$\{var.github_owner}"
+    url                     = "https://github.com/$${var.github_owner}/$${var.github_repo_name}"
     githubAppID             = var.github_app_id
     githubAppInstallationID = var.github_app_installation_id
-    githubAppPrivateKey     = github_app_private_key.vega.private_key
+    githubAppPrivateKey     = jsondecode(data.aws_secretsmanager_secret_version.github_app_private_key.secret_string)["github-app-private-key"]
   }
 
   depends_on = [helm_release.argocd]

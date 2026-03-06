@@ -35,6 +35,8 @@ Cluster Kubernetes leve (K3s) rodando em EC2 na AWS, com RDS PostgreSQL como dat
                    │                      │     ├── AWS LB Controller     │
                    │                      │     └── whoami (validacao)    │
                    │                      │                               │
+                   │                  EC2 ASG (K3s workers)               │
+                   │                      │                               │
                    │                      └── RDS PostgreSQL (datastore)  │
                    │                                                      │
                    │  S3 (OIDC discovery) ── IAM OIDC Provider (IRSA)    │
@@ -73,10 +75,12 @@ Security Groups, IRSA roles      Namespaces + Secrets             cert-manager, 
 | Terragrunt   | >= 0.55       | https://terragrunt.gruntwork.io                 |
 | AWS CLI      | v2            | https://docs.aws.amazon.com/cli/latest/userguide |
 | kubectl      | >= 1.28       | https://kubernetes.io/docs/tasks/tools           |
-| yq           | v4            | https://github.com/mikefarah/yq                 |
+| yq           | Python (kislyuk) | `pip install yq` — **nao** o mikefarah/yq   |
 | jq           | >= 1.6        | https://jqlang.github.io/jq                     |
 
 `yq` e `jq` sao necessarios para o `deploy.sh generate-values` que extrai outputs do Terraform e escreve nos values files do ArgoCD.
+
+> **Atencao:** o `deploy.sh` usa flags `-Yi` do `yq` Python (kislyuk). O `yq` Go (mikefarah) usa sintaxe diferente e nao e compativel.
 
 ### Infraestrutura AWS pre-existente
 
@@ -87,19 +91,32 @@ O cluster depende de recursos criados por outros units do Terragrunt:
 
 ### Acesso ao repositorio Git
 
-O ArgoCD precisa acessar este repositorio para sincronizar os manifests. Antes do primeiro deploy, configure o acesso:
+O ArgoCD acessa o repositorio via **GitHub App**. A chave privada do App e armazenada no AWS Secrets Manager e lida pelo Terraform automaticamente — nao e criada pelo Terraform.
+
+**Pre-requisito unico (feito uma vez):** criar a secret com a chave privada baixada do GitHub UI:
 
 ```bash
-# Opcao 1: Secret com Personal Access Token
-kubectl -n argocd create secret generic infra-iac-repo \
-  --from-literal=url=https://github.com/Vinny1892/infra-iac.git \
-  --from-literal=password=<GITHUB_PAT> \
-  --from-literal=username=git \
-  --from-literal=type=git
-kubectl -n argocd label secret infra-iac-repo argocd.argoproj.io/secret-type=repository
-
-# Opcao 2: Tornar o repo publico (sem secret necessario)
+AWS_PROFILE=personal aws secretsmanager create-secret \
+  --name "github-app-private-key" \
+  --region us-east-1 \
+  --secret-string "{\"github-app-private-key\": \"$(cat /caminho/para/app.private-key.pem)\"}"
 ```
+
+**Permissoes necessarias no GitHub App:**
+- `Contents: Read-only` — clonar repositorios e ler arquivos
+- `Metadata: Read-only` — obrigatoria por padrao
+
+**Configuracao de acesso:** em **GitHub > Settings > Installations > seu app**, adicionar o repositorio `infra-iac` em *Repository access*.
+
+Exporte as variaveis de ambiente antes do deploy:
+
+```bash
+export GITHUB_OWNER="Vinny1892"
+export GITHUB_APP_ID="<app_id>"
+export GITHUB_APP_INSTALL_ID="<installation_id>"
+```
+
+Os valores sao encontrados em **GitHub > Settings > Developer settings > GitHub Apps > seu app**.
 
 ---
 
@@ -107,14 +124,18 @@ kubectl -n argocd label secret infra-iac-repo argocd.argoproj.io/secret-type=rep
 
 ### Mapa de credenciais
 
-| Credencial              | Onde e configurada                | Onde e usada                                    | Motivo                                                     |
-|-------------------------|-----------------------------------|-------------------------------------------------|------------------------------------------------------------|
-| `AWS_PROFILE=personal`  | `~/.aws/credentials`             | Terraform, AWS CLI, deploy.sh                   | Autenticacao com a AWS para criar/gerenciar recursos       |
-| `CLOUDFLARE_API_TOKEN`  | Variavel de ambiente             | Terraform (`TF_VAR_cloudflare_api_token`)       | Criacao de K8s secrets para cert-manager e ExternalDNS     |
-| Kubeconfig              | SSM `/k3s/kubeconfig`            | Terraform providers (helm/kubernetes), kubectl  | Acesso ao cluster K3s (gerado automaticamente pelo master) |
-| RDS password            | AWS Secrets Manager (gerenciado) | K3s datastore (recuperado no boot da EC2)       | Conexao K3s → PostgreSQL (nunca em plain-text no TF state) |
-| Let's Encrypt key       | K8s Secret `letsencrypt-prod-key`| cert-manager                                    | Chave privada ACME para emitir certificados TLS            |
-| IRSA roles              | IAM (criadas pelo `cluster/`)    | Pods via ServiceAccount annotations             | Permissoes AWS para LB Controller e ArgoCD sem credentials |
+| Credencial                  | Onde e configurada                         | Onde e usada                                    | Motivo                                                     |
+|-----------------------------|--------------------------------------------|-------------------------------------------------|------------------------------------------------------------|
+| `AWS_PROFILE=personal`      | `~/.aws/credentials`                      | Terraform, AWS CLI, deploy.sh                   | Autenticacao com a AWS para criar/gerenciar recursos       |
+| `CLOUDFLARE_API_TOKEN`      | Variavel de ambiente                      | Terraform (`TF_VAR_cloudflare_api_token`)       | Criacao de K8s secrets para cert-manager e ExternalDNS     |
+| `GITHUB_OWNER`              | Variavel de ambiente                      | Terraform (`helms/`) — secret do ArgoCD         | Dono/org do GitHub para o repositorio do ArgoCD            |
+| `GITHUB_APP_ID`             | Variavel de ambiente                      | Terraform — K8s secret `argocd-repo`            | App ID do GitHub App                                       |
+| `GITHUB_APP_INSTALL_ID`     | Variavel de ambiente                      | Terraform — K8s secret `argocd-repo`            | Installation ID do GitHub App no repositorio               |
+| GitHub App private key      | AWS Secrets Manager `github-app-private-key` | Terraform lê e injeta no K8s secret do ArgoCD | Chave privada do GitHub App para autenticacao Git          |
+| Kubeconfig                  | SSM `/k3s/kubeconfig`                     | Terraform providers (helm/kubernetes), kubectl  | Acesso ao cluster K3s (gerado automaticamente pelo master) |
+| RDS password                | AWS Secrets Manager (gerenciado pelo RDS) | K3s datastore (recuperado no boot da EC2)       | Conexao K3s → PostgreSQL (nunca em plain-text no TF state) |
+| Let's Encrypt key           | K8s Secret `letsencrypt-prod-key`         | cert-manager                                    | Chave privada ACME para emitir certificados TLS            |
+| IRSA roles                  | IAM (criadas pelo `cluster/`)             | Pods via ServiceAccount annotations             | Permissoes AWS para LB Controller e ArgoCD sem credentials |
 
 ### Como carregar as credenciais
 
@@ -123,6 +144,11 @@ Antes de rodar qualquer comando, as seguintes variaveis de ambiente precisam est
 ```bash
 export AWS_PROFILE=personal
 export CLOUDFLARE_API_TOKEN="<seu-token-cloudflare>"
+
+# GitHub App — necessario para o Terraform criar o secret de acesso ao repo no ArgoCD
+export GITHUB_OWNER="Vinny1892"
+export GITHUB_APP_ID="<app_id>"
+export GITHUB_APP_INSTALL_ID="<installation_id>"
 ```
 
 O `deploy.sh` tenta carrega-las automaticamente se nao estiverem setadas. Para verificar:
@@ -130,6 +156,7 @@ O `deploy.sh` tenta carrega-las automaticamente se nao estiverem setadas. Para v
 ```bash
 echo $AWS_PROFILE            # → personal
 echo $CLOUDFLARE_API_TOKEN   # → cfp_... (token da API Cloudflare)
+echo $GITHUB_APP_ID          # → <numero do app>
 aws sts get-caller-identity  # → confirma acesso AWS
 ```
 
@@ -144,6 +171,25 @@ O mesmo token e injetado em dois K8s secrets (um por namespace):
 - `external-dns/cloudflare-api-token` — usado pelo ExternalDNS para criar registros CNAME automaticamente
 
 Ambos os secrets sao criados pelo Terraform (`helms/terragrunt.hcl`) **antes** do ArgoCD existir e nao tem labels do ArgoCD, entao nao sao prunados.
+
+### GitHub App (acesso ao repositorio pelo ArgoCD)
+
+O ArgoCD acessa o repositorio via **GitHub App** com chave privada armazenada no AWS Secrets Manager.
+
+**Como funciona:**
+1. A chave privada do GitHub App e gerada manualmente no GitHub UI e armazenada no Secrets Manager (`github-app-private-key`)
+2. Terraform (`helms/`) le a chave do Secrets Manager e injeta num `kubernetes_secret` com label `argocd.argoproj.io/secret-type=repository`
+3. O ArgoCD detecta o secret e autentica via GitHub App
+
+> **Por que nao via Terraform provider?** O provider `integrations/github` v6 nao possui o recurso `github_app_private_key` — chaves privadas de GitHub Apps sao geradas manualmente no GitHub UI.
+
+**Configuracao necessaria no GitHub App:**
+- Permissoes: `Contents: Read-only`, `Metadata: Read-only`
+- Em *Installations*, adicionar o repositorio `infra-iac` em *Repository access* (nao deixar em "All repositories" sem necessidade)
+
+**Como obter os valores:**
+- `GITHUB_APP_ID` — GitHub > Settings > Developer settings > GitHub Apps > seu app > **App ID**
+- `GITHUB_APP_INSTALL_ID` — GitHub > Settings > Developer settings > GitHub Apps > **Instalar** > a URL contem o installation ID (`/installations/<id>`)
 
 ### IRSA (IAM Roles for Service Accounts)
 
@@ -209,6 +255,9 @@ Se preferir executar passo a passo:
 # 1. Carregar credenciais
 export AWS_PROFILE=personal
 export CLOUDFLARE_API_TOKEN="<seu-token>"
+export GITHUB_OWNER="Vinny1892"
+export GITHUB_APP_ID="<app_id>"
+export GITHUB_APP_INSTALL_ID="<installation_id>"
 
 # 2. Deploy da infraestrutura
 cd cluster/
@@ -229,23 +278,16 @@ bash deploy.sh generate-values
 # IMPORTANTE: commit e push dos values gerados antes do proximo passo
 git add argocd/values/ && git commit -m "chore: generate argocd values" && git push
 
-# 6. Bootstrap ArgoCD + secrets
+# 6. Bootstrap ArgoCD + secrets (inclui secret do GitHub App gerado pelo Terraform)
 cd helms/
 export TF_VAR_cloudflare_api_token="$CLOUDFLARE_API_TOKEN"
 terragrunt init && terragrunt apply
+# O Terraform gera a chave privada do GitHub App e cria o secret de repo no ArgoCD automaticamente
 
-# 7. Configurar acesso ao repo Git (se privado)
-kubectl -n argocd create secret generic infra-iac-repo \
-  --from-literal=url=https://github.com/Vinny1892/infra-iac.git \
-  --from-literal=password=<PAT> \
-  --from-literal=username=git \
-  --from-literal=type=git
-kubectl -n argocd label secret infra-iac-repo argocd.argoproj.io/secret-type=repository
-
-# 8. Aplicar App of Apps
+# 7. Aplicar App of Apps
 kubectl apply -f argocd/root-app.yaml
 
-# 9. Acompanhar sync
+# 8. Acompanhar sync
 watch kubectl get applications -n argocd
 ```
 
@@ -309,12 +351,16 @@ Cria toda a infraestrutura AWS:
 
 | Recurso                     | Descricao                                               |
 |-----------------------------|---------------------------------------------------------|
-| EC2 Auto Scaling Group      | K3s masters (t2.medium, Ubuntu)                         |
-| Launch Template             | User-data com init-master.tfpl (instala K3s)            |
+| EC2 Auto Scaling Group (masters) | K3s masters (t2.medium, Ubuntu)                    |
+| EC2 Auto Scaling Group (workers) | K3s workers (t3.medium, Ubuntu)                    |
+| Launch Template (master)    | User-data com init-master.tfpl (instala K3s server)     |
+| Launch Template (worker)    | User-data com init-worker.tfpl (instala K3s agent)      |
 | RDS PostgreSQL              | Datastore do K3s (db.t3.micro, 20GB, managed password)  |
 | Network Load Balancer       | Acesso externo ao K8s API (:6443)                       |
-| Security Groups             | k3s_sg (cluster) + database_sg (RDS)                    |
-| IAM Roles                   | Node role (SSM, S3, SecretsManager) + IRSA roles        |
+| Security Groups             | k3s_sg (masters + workers) + database_sg (RDS)          |
+| IAM Role (master)           | SSM, S3 OIDC, SecretsManager (RDS password)             |
+| IAM Role (worker)           | SSM apenas (least privilege)                            |
+| IRSA Roles                  | k3s-aws-lb-controller + k3s-argocd                      |
 | S3 Bucket                   | OIDC discovery endpoint (publico)                       |
 | IAM OIDC Provider           | Federacao para IRSA                                     |
 | SSM Parameter               | `/k3s/kubeconfig` (SecureString, gerado pelo master)    |
@@ -323,13 +369,15 @@ Cria toda a infraestrutura AWS:
 
 Bootstrap minimo antes do ArgoCD existir:
 
-| Recurso                         | Descricao                                      |
-|---------------------------------|------------------------------------------------|
-| `helm_release.argocd`           | Instalacao seed do ArgoCD (config minima)       |
-| `kubernetes_namespace.cert_manager` | Namespace cert-manager                      |
-| `kubernetes_secret.cloudflare_api_token` | Token Cloudflare para cert-manager     |
-| `kubernetes_namespace.external_dns` | Namespace external-dns                      |
-| `kubernetes_secret.cloudflare_api_token_eds` | Token Cloudflare para ExternalDNS   |
+| Recurso                                      | Descricao                                                      |
+|----------------------------------------------|----------------------------------------------------------------|
+| `helm_release.argocd`                                         | Instalacao seed do ArgoCD (config minima)                                    |
+| `kubernetes_namespace.cert_manager`                           | Namespace cert-manager                                                       |
+| `kubernetes_secret.cloudflare_api_token`                      | Token Cloudflare para cert-manager                                           |
+| `kubernetes_namespace.external_dns`                           | Namespace external-dns                                                       |
+| `kubernetes_secret.cloudflare_api_token_eds`                  | Token Cloudflare para ExternalDNS                                            |
+| `data.aws_secretsmanager_secret_version.github_app_private_key` | Le chave privada do GitHub App no Secrets Manager                          |
+| `kubernetes_secret.argocd_repo_vega`                          | Secret tipo `repository` com GitHub App credentials para ArgoCD             |
 
 ### ArgoCD — `argocd/`
 
@@ -424,7 +472,7 @@ IMDSv1 e vulneravel a SSRF (Server-Side Request Forgery). Qualquer processo que 
 1. Criar values file em `argocd/values/<app>.yaml` (se Helm chart)
 2. Criar manifests em `argocd/manifests/<app>/` (se YAML puro)
 3. Criar Application em `argocd/apps/<app>.yaml` com sync wave adequada
-4. Commit + push para `main`
+4. Commit + push para `master`
 5. ArgoCD detecta e sincroniza automaticamente
 
 ### Atualizar versao de um chart
@@ -562,6 +610,64 @@ kubectl -n argocd get events --sort-by='.lastTimestamp'
 kubectl -n argocd patch app <nome> -p '{"operation":{"sync":{"revision":"HEAD"}}}' --type merge
 ```
 
+### IRSA nao funciona apos primeiro deploy (AccessDenied no LB Controller)
+
+**Sintoma:** AWS LB Controller com erro `AccessDenied: assumed-role/k3s-node-role is not authorized`.
+
+**Causa:** O LB Controller foi criado antes do pod-identity-webhook estar pronto. O webhook mutating nao conseguiu injetar as variaveis `AWS_ROLE_ARN` e `AWS_WEB_IDENTITY_TOKEN_FILE` no pod.
+
+**Solucao:** reiniciar o deployment apos confirmar que o webhook esta rodando:
+
+```bash
+kubectl get pods -n kube-system -l app.kubernetes.io/name=amazon-eks-pod-identity-webhook
+kubectl rollout restart deployment -n kube-system -l app.kubernetes.io/name=aws-load-balancer-controller
+# Verificar injecao:
+kubectl get pod -n kube-system -l app.kubernetes.io/name=aws-load-balancer-controller \
+  -o jsonpath='{.items[0].spec.containers[0].env[*].name}' | tr ' ' '\n' | grep AWS_ROLE
+```
+
+### ArgoCD nao consegue acessar repositorio (authentication required)
+
+**Sintoma:** Apps com `Failed to load target state: authentication required: Repository not found`.
+
+**Verificacoes em ordem:**
+
+1. **Chave privada vazia:** confirmar que o secret tem a chave:
+```bash
+kubectl get secret repo-vega-private -n argocd \
+  -o jsonpath='{.data.githubAppPrivateKey}' | base64 -d | wc -c
+# Deve ser > 1000 bytes
+```
+
+2. **Formato PEM invalido:** a chave deve ter quebras de linha reais (nao espacos):
+```bash
+kubectl get secret repo-vega-private -n argocd \
+  -o jsonpath='{.data.githubAppPrivateKey}' | base64 -d | head -1
+# Deve retornar somente: -----BEGIN RSA PRIVATE KEY-----
+```
+Se a chave estiver em uma linha so (com espacos), re-armazenar no Secrets Manager com o PEM formatado corretamente.
+
+3. **GitHub App sem acesso ao repositorio:** verificar em GitHub > Settings > Installations > seu app > *Repository access* se o `infra-iac` esta listado.
+
+4. **URL do secret nao bate com o repositorio:** o campo `url` no secret deve ser `https://github.com/Vinny1892/infra-iac` (sem `.git`, para bater com o `repoURL` das Applications).
+
+### Git submodules com SSH causando falha no ArgoCD
+
+**Sintoma:** `failed to update submodules: git submodule update --init --recursive failed`.
+
+**Causa:** o repo tem submodules com URL SSH (`git@github.com:...`) que o ArgoCD nao consegue clonar porque so tem credenciais HTTPS via GitHub App.
+
+**Solucao:** adicionar `update = none` no `.gitmodules` para os submodules que o ArgoCD nao precisa clonar:
+
+```
+[submodule "caminho/para/submodule"]
+    path = caminho/para/submodule
+    url = git@github.com:...
+    update = none
+```
+
+Commit e push. O ArgoCD ira ignorar esses submodules no checkout.
+
 ### Terraform plan mostra mudancas apos migracao
 
 **Sintoma:** `cd helms/ && terragrunt plan` mostra recursos para destruir.
@@ -665,6 +771,8 @@ Para mais detalhes sobre a infraestrutura de testes, fixtures e como criar novos
 | Kubernetes Prov. | ~> 2.0          | hashicorp/kubernetes         |
 | K3s              | v1.35.1+k3s1    | Instalado via get.k3s.io     |
 | PostgreSQL (RDS) | 13              | db.t3.micro, 20GB            |
+| Masters          | t2.medium       | `master_instance_type`       |
+| Workers          | t3.medium       | `worker_instance_type`       |
 
 ### Helm Charts (gerenciados pelo ArgoCD)
 

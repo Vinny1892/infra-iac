@@ -166,13 +166,13 @@ generate_values() {
 
   # Update aws-lb-controller values
   local lb_values="$ARGOCD_DIR/values/aws-lb-controller.yaml"
-  yq -i ".serviceAccount.annotations.\"eks.amazonaws.com/role-arn\" = \"$aws_lb_role_arn\"" "$lb_values"
-  yq -i ".vpcId = \"$vpc_id\"" "$lb_values"
+  yq -Yi ".serviceAccount.annotations.\"eks.amazonaws.com/role-arn\" = \"$aws_lb_role_arn\"" "$lb_values"
+  yq -Yi ".vpcId = \"$vpc_id\"" "$lb_values"
   log "Updated $lb_values"
 
   # Update argocd values
   local argocd_values="$ARGOCD_DIR/values/argocd.yaml"
-  yq -i ".server.serviceAccount.annotations.\"eks.amazonaws.com/role-arn\" = \"$argocd_role_arn\"" "$argocd_values"
+  yq -Yi ".server.serviceAccount.annotations.\"eks.amazonaws.com/role-arn\" = \"$argocd_role_arn\"" "$argocd_values"
   log "Updated $argocd_values"
 
   log "Values generated. Commit and push these files before deploying ArgoCD apps."

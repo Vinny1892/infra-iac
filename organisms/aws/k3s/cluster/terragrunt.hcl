@@ -29,10 +29,6 @@ provider "aws" {
 EOF
 }
 
-locals {
-  scripts_dir = "${get_repo_root()}/organisms/aws/k3s/cluster/scripts"
-}
-
 generate "main" {
   path      = "main.tf"
   if_exists = "overwrite_terragrunt"
@@ -64,6 +60,20 @@ variable "masters_count" {
   default = 2
 }
 
+variable "master_instance_type" {
+  type    = string
+  default = "t2.medium"
+}
+
+variable "workers_count" {
+  type    = number
+  default = 1
+}
+
+variable "worker_instance_type" {
+  type    = string
+  default = "t3.medium"
+}
 
 locals {
   cluster_dns_name = aws_lb.k3s_api_nlb.dns_name
@@ -230,6 +240,32 @@ resource "aws_iam_role_policy" "k3s_rds_secret" {
 resource "aws_iam_instance_profile" "k3s_node_profile" {
   name = "k3s-node-instance-profile"
   role = aws_iam_role.k3s_node_role.name
+}
+
+# =============================================================================
+# IAM - Worker Role
+# =============================================================================
+
+resource "aws_iam_role" "k3s_worker_role" {
+  name = "k3s-worker-role"
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { Service = "ec2.amazonaws.com" }
+      Action    = "sts:AssumeRole"
+    }]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "worker_ssm_core" {
+  role       = aws_iam_role.k3s_worker_role.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+}
+
+resource "aws_iam_instance_profile" "k3s_worker_profile" {
+  name = "k3s-worker-instance-profile"
+  role = aws_iam_role.k3s_worker_role.name
 }
 
 # =============================================================================
@@ -577,7 +613,7 @@ resource "aws_db_instance" "k3s_rds" {
 resource "aws_launch_template" "k3s_master" {
   name          = "k3s-master-lt"
   image_id      = "ami-01816d07b1128cd2d"
-  instance_type = "t2.medium"
+  instance_type = var.master_instance_type
 
   vpc_security_group_ids = [aws_security_group.k3s_sg.id]
 
@@ -585,7 +621,7 @@ resource "aws_launch_template" "k3s_master" {
     name = aws_iam_instance_profile.k3s_node_profile.name
   }
 
-  user_data = base64encode(templatefile("${local.scripts_dir}/init-master.tfpl", {
+  user_data = base64encode(templatefile("$${path.module}/scripts/init-master.tfpl", {
     token          = var.k3s_token
     username       = aws_db_instance.k3s_rds.username
     rds_secret_arn = aws_db_instance.k3s_rds.master_user_secret[0].secret_arn
@@ -610,6 +646,39 @@ resource "aws_launch_template" "k3s_master" {
 }
 
 # =============================================================================
+# Launch Template - Worker
+# =============================================================================
+
+resource "aws_launch_template" "k3s_worker" {
+  name          = "k3s-worker-lt"
+  image_id      = "ami-01816d07b1128cd2d"
+  instance_type = var.worker_instance_type
+
+  vpc_security_group_ids = [aws_security_group.k3s_sg.id]
+
+  iam_instance_profile {
+    name = aws_iam_instance_profile.k3s_worker_profile.name
+  }
+
+  user_data = base64encode(templatefile("$${path.module}/scripts/init-worker.tfpl", {
+    token    = var.k3s_token
+    dns_name = local.cluster_dns_name
+  }))
+
+  metadata_options {
+    http_endpoint = "enabled"
+    http_tokens   = "required"
+  }
+
+  tag_specifications {
+    resource_type = "instance"
+    tags = {
+      Name = "k3s-worker"
+    }
+  }
+}
+
+# =============================================================================
 # Auto Scaling Group
 # =============================================================================
 
@@ -629,6 +698,26 @@ resource "aws_autoscaling_group" "k3s_masters" {
   tag {
     key                 = "Name"
     value               = "k3s-master"
+    propagate_at_launch = true
+  }
+}
+
+resource "aws_autoscaling_group" "k3s_workers" {
+  name             = "k3s-workers"
+  min_size         = var.workers_count
+  max_size         = var.workers_count
+  desired_capacity = var.workers_count
+
+  vpc_zone_identifier = var.private_subnet_ids
+
+  launch_template {
+    id      = aws_launch_template.k3s_worker.id
+    version = "$Latest"
+  }
+
+  tag {
+    key                 = "Name"
+    value               = "k3s-worker"
     propagate_at_launch = true
   }
 }
@@ -715,6 +804,10 @@ output "argocd_role_arn" {
 
 output "vpc_id" {
   value = var.vpc_id
+}
+
+output "workers_asg_name" {
+  value = aws_autoscaling_group.k3s_workers.name
 }
 EOF
 }
