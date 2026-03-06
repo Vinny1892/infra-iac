@@ -6,6 +6,23 @@ terraform {
   source = "../../../../../../../organisms/aws/k3s/cluster"
 }
 
+generate "provider" {
+  path      = "provider.tf"
+  if_exists = "overwrite_terragrunt"
+  contents  = <<EOF
+provider "aws" {
+  region = "us-east-1"
+  default_tags {
+    tags = {
+      managed_by  = "terraform"
+      environment = "testing"
+      account     = "personal"
+    }
+  }
+}
+EOF
+}
+
 dependency "vpc" {
   config_path = "../../../network/vpc"
 
