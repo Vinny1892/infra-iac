@@ -12,10 +12,6 @@ terraform {
       source  = "hashicorp/kubernetes"
       version = "~> 2.0"
     }
-    github = {
-      source  = "integrations/github"
-      version = "~> 6.0"
-    }
   }
 }
 
@@ -36,10 +32,6 @@ provider "helm" {
 
 provider "kubernetes" {
   host = "http://localhost:8080"
-}
-
-provider "github" {
-  owner = var.github_owner
 }
 
 variable "argocd_role_arn" {
@@ -68,13 +60,18 @@ variable "github_app_installation_id" {
   default = "67890"
 }
 
+variable "github_repo_name" {
+  type    = string
+  default = "infra-iac"
+}
+
 # =============================================================================
-# GitHub App Key Generation (Mocked for tests)
+# GitHub App Private Key (from Secrets Manager)
 # =============================================================================
 
-# resource "github_app_private_key" "vega" {
-#   app_id = var.github_app_id
-# }
+data "aws_secretsmanager_secret_version" "github_app_private_key" {
+  secret_id = "github-app-private-key"
+}
 
 # =============================================================================
 # Bootstrap: Namespaces + Secrets (created before ArgoCD exists)
@@ -170,10 +167,10 @@ resource "kubernetes_secret" "argocd_repo_vega" {
 
   data = {
     type                    = "git"
-    url                     = "https://github.com/${var.github_owner}"
+    url                     = "https://github.com/${var.github_owner}/${var.github_repo_name}"
     githubAppID             = var.github_app_id
     githubAppInstallationID = var.github_app_installation_id
-    githubAppPrivateKey     = "mock-private-key"
+    githubAppPrivateKey     = jsondecode(data.aws_secretsmanager_secret_version.github_app_private_key.secret_string)["github-app-private-key"]
   }
 
   depends_on = [helm_release.argocd]
