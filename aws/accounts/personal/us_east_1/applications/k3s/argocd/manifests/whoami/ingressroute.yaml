@@ -4,7 +4,7 @@ metadata:
   name: whoami
   namespace: whoami
   annotations:
-    external-dns.alpha.kubernetes.io/target: k8s-traefik-traefik-b1092d969c-29bb905179fb476a.elb.us-east-1.amazonaws.com
+    external-dns.alpha.kubernetes.io/target: ${TRAEFIK_NLB_HOSTNAME}
 spec:
   entryPoints:
     - websecure
