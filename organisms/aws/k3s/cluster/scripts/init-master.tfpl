@@ -82,8 +82,12 @@ aws s3 cp /tmp/jwks.json s3://${oidc_bucket}/openid/v1/jwks \
     --content-type application/json \
     --region us-east-1
 
-# Save kubeconfig to SSM (replace localhost with NLB DNS)
-KUBECONFIG_CONTENT=$(sed "s/127.0.0.1/${dns_name}/g" /etc/rancher/k3s/k3s.yaml)
+# Save kubeconfig to SSM (replace localhost with NLB DNS, rename context to k3s-aws)
+KUBECONFIG_CONTENT=$(sed "s/127.0.0.1/${dns_name}/g" /etc/rancher/k3s/k3s.yaml \
+  | sed 's/name: default/name: k3s-aws/g' \
+  | sed 's/cluster: default/cluster: k3s-aws/g' \
+  | sed 's/user: default/user: k3s-aws/g' \
+  | sed 's/current-context: default/current-context: k3s-aws/g')
 aws ssm put-parameter \
     --name "/k3s/kubeconfig" \
     --type "SecureString" \

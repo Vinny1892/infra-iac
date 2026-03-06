@@ -116,6 +116,13 @@ setup_kubeconfig() {
     --query "Parameter.Value" \
     --output text > "$kubeconfig_path"
 
+  chmod 600 "$kubeconfig_path"
+
+  # Garante que o contexto seja k3s-aws independente do que veio do SSM
+  if kubectl --kubeconfig "$kubeconfig_path" config get-contexts default &>/dev/null; then
+    kubectl --kubeconfig "$kubeconfig_path" config rename-context default k3s-aws
+  fi
+
   export KUBECONFIG="$kubeconfig_path"
 
   log "Testing cluster connectivity..."
@@ -145,7 +152,8 @@ setup_kubeconfig() {
 
   chmod 600 "$kube_config"
   export KUBECONFIG="$kube_config"
-  log "Kubeconfig merged into $kube_config"
+  kubectl config use-context k3s-aws
+  log "Kubeconfig merged into $kube_config — contexto ativo: k3s-aws"
 }
 
 generate_values() {
