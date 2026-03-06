@@ -16,9 +16,9 @@ ports:
 providers:
   kubernetesCRD:
     enabled: true
-    publishedService:
-      enabled: true
   kubernetesIngress:
+    enabled: true
+  publishedService:
     enabled: true
 
 logs:
