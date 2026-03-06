@@ -227,6 +227,7 @@ O script executa 7 passos em sequencia:
 | 4/7  | `generate_values` — Extrai outputs do cluster, escreve nos values do ArgoCD | ~15 seg        |
 | 5/7  | `deploy_helms` — Terragrunt apply no `helms/` (ArgoCD seed + secrets)       | ~2-3 min       |
 | 6/7  | `deploy_root_app` — `kubectl apply` root-app + aguarda sync de todas apps  | ~5-10 min      |
+| 4.5/7| `patch_ingress_routes` — Injeta DNS real do NLB nos manifestos locais      | ~30 seg        |
 | 7/7  | `verify` — Checa pods, services, certificates, DNS                          | ~10 seg        |
 
 **Tempo total: ~20-30 minutos** (RDS e o gargalo principal).
@@ -392,6 +393,7 @@ Apos o bootstrap, ArgoCD sincroniza automaticamente todos os workloads via App o
 | external-dns         | -1   | external-dns 1.20.0        | external-dns  | DNS automatico via Cloudflare           |
 | traefik              |  0   | traefik 39.0.2             | traefik       | Ingress controller com NLB              |
 | argocd               |  1   | argo-cd 9.4.5              | argocd        | Self-managed (assume config completa)   |
+| argocd-config        |  1.5 | Git manifests              | argocd        | IngressRoute e Certificate para ArgoCD  |
 | whoami               |  2   | Git manifests              | whoami        | App de validacao (health check)         |
 
 As **sync waves** garantem a ordem de deploy. ArgoCD espera cada wave ficar `Healthy` antes de prosseguir.
@@ -437,6 +439,8 @@ Com ExternalDNS:
 - Cria/atualiza CNAME automaticamente no Cloudflare
 - Se uma IngressRoute e deletada, o registro DNS tambem e (policy: sync)
 - Adicionar um dominio novo e so criar uma IngressRoute
+
+**Nota sobre automacao:** Como o Traefik CRD as vezes nao popula o status de forma confiavel, o `deploy.sh` executa o `patch_ingress_routes` para injetar o hostname do NLB real na annotation `external-dns.alpha.kubernetes.io/target` dos manifestos locais (substituindo o placeholder `${TRAEFIK_NLB_HOSTNAME}`) antes de finalizar o sync do ArgoCD.
 
 ### Por que IRSA customizado com Pod Identity Webhook?
 
