@@ -1,5 +1,4 @@
-provider:
-  name: cloudflare
+provider: cloudflare
 
 env:
   - name: CF_API_TOKEN
