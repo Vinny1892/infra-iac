@@ -18,3 +18,14 @@ variable "availability_zone" {
   type        = list(string)
 }
 
+variable "extra_public_subnet_tags" {
+  description = "Extra tags for public subnets"
+  type        = map(string)
+  default     = {}
+}
+
+variable "extra_private_subnet_tags" {
+  description = "Extra tags for private subnets"
+  type        = map(string)
+  default     = {}
+}

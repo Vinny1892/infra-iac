@@ -15,10 +15,10 @@ resource "aws_subnet" "public" {
   availability_zone       = var.availability_zone[count.index]
   map_public_ip_on_launch = true
 
-  tags = {
+  tags = merge({
     type_subnet = "public"
     Name        = "PublicSubnet-${count.index + 1}"
-  }
+  }, var.extra_public_subnet_tags)
 }
 
 resource "aws_subnet" "private" {
@@ -28,9 +28,9 @@ resource "aws_subnet" "private" {
   vpc_id            = aws_vpc.main.id
   availability_zone = var.availability_zone[count.index]
 
-  tags = {
-    Name = "PrivateSubnet-${count.index + 1}"
-  }
+  tags = merge({
+    Name        = "PrivateSubnet-${count.index + 1}"
+  }, var.extra_private_subnet_tags)
 }
 
 resource "aws_internet_gateway" "gw" {

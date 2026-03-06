@@ -102,7 +102,8 @@ infra-iac/
 ├── scripts/                    # Utility scripts (e.g. extract-k3s-fixture.sh)
 ├── Makefile                    # lint / test / coverage targets
 ├── .tflint.hcl                 # TFLint config (AWS ruleset v0.35.0)
-└── mise.toml                   # Pinned tool versions (terraform, terragrunt, go, tflint)
+├── mise.toml                   # Pinned tool versions (terraform, terragrunt, go, tflint)
+└── docs/TESTES.md              # Guia completo de testes e linting (pt-br)
 ```
 
 ### Terragrunt Configuration Hierarchy
@@ -130,7 +131,7 @@ Managed via Terragrunt `dependency` blocks (automatic ordering with `run-all`):
 **Atoms — OCI** (`atoms/oci/`): `network/vcn`
 **Atoms — Cloudflare** (`atoms/cloudflare/`): `domain`, `tunnel`
 **Molecules** (`molecules/aws/`): `network`, `ecs/app`
-**Organisms** (`organisms/aws/`): `k3s/cluster`
+**Organisms** (`organisms/aws/`): `k3s/cluster` (masters + workers ASG, NLB, RDS, IAM, OIDC)
 
 ### Applications
 
@@ -161,6 +162,14 @@ Before running any `terragrunt` or `aws` command locally, export the required en
 ```bash
 export AWS_PROFILE=personal          # selects the AWS CLI profile for the personal account
 export CLOUDFLARE_API_TOKEN=<token>  # Cloudflare API token (stored in ~/.bashrc)
+```
+
+For the K3s `helms/` unit (ArgoCD bootstrap with GitHub App):
+
+```bash
+export GITHUB_OWNER="Vinny1892"
+export GITHUB_APP_ID="<app_id>"
+export GITHUB_APP_INSTALL_ID="<installation_id>"
 ```
 
 Without these, provider auth will fail for AWS and Cloudflare. Both are defined in `~/.bashrc` via the `load_tf_vinny_root` shell function as a convenience shortcut.
@@ -207,9 +216,22 @@ module "vpc" { source = "../../../atoms/aws/network/vpc" ... }
 - **Validate** — calls `terraform.Validate(t, opts)` — checks HCL syntax and types
 - **Plan** — calls `terraform.InitAndPlanAndShowWithStruct(t, opts)` — checks plan structure without applying
 
-**K3s organism test:** the K3s fixture is generated dynamically by `scripts/extract-k3s-fixture.sh` (strips Terragrunt locals, injects mock provider). Run the script once before running `TestK3sOrganismValidate`.
+**K3s organism test:** the K3s fixture is generated dynamically by `scripts/extract-k3s-fixture.sh` (strips Terragrunt locals, injects mock provider). Run the script once before running `TestK3sOrganismValidate` or `TestK3sWorkerPlan`. The fixture at `tests/fixtures/k3s_extracted/` is checked in and must be kept in sync with the organism when the organism changes.
+
+**K3s worker plan test:** `TestK3sWorkerPlan` runs `InitAndPlanAndShowWithStruct` and asserts that `aws_launch_template.k3s_worker`, `aws_autoscaling_group.k3s_workers`, `aws_iam_role.k3s_worker_role`, and `aws_iam_instance_profile.k3s_worker_profile` appear in the plan.
+
+**GitHub App fixture:** `tests/fixtures/argocd_github_app/` validates the `helms/` bootstrap unit (ArgoCD seed + GitHub App private key + repo secret). The `github_app_private_key` resource is commented out in the fixture since it requires a live GitHub API call — a mock key string is used instead.
 
 **Coverage report:** `make coverage-report` generates `coverage.html` (gitignored) showing which modules have validate/plan tests.
+
+### K3s Organism — Notas de Implementação
+
+- Scripts de user-data ficam em `organisms/aws/k3s/cluster/scripts/` (fonte) e espelhados em `aws/.../applications/k3s/cluster/scripts/` (usados em produção via `path.module`)
+- `init-master.tfpl` — instala `k3s server`, conecta ao RDS via Secrets Manager, faz upload do JWKS para S3, salva kubeconfig no SSM com sed para substituir `127.0.0.1` pelo DNS do NLB
+- `init-worker.tfpl` — instala `k3s agent` apenas, aponta para o NLB. Não acessa RDS, SSM ou S3
+- Workers usam IAM role separada (`k3s-worker-role`) com apenas `AmazonSSMManagedInstanceCore` (least privilege)
+- O templatefile no generate block usa `$${path.module}` (dois `$` para escapar o Terragrunt) que vira `${path.module}` no `.tf` gerado
+- GitHub App: Terraform gera a chave privada via `github_app_private_key` e injeta no K8s secret do ArgoCD com `argocd.argoproj.io/secret-type=repository`
 
 ### Terraform Version
 

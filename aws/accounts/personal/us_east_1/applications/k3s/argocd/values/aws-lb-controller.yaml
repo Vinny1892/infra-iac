@@ -4,5 +4,5 @@ serviceAccount:
   name: aws-load-balancer-controller
   annotations:
     eks.amazonaws.com/role-arn: arn:aws:iam::036785638465:role/k3s-aws-lb-controller
-vpcId: vpc-00b70b6f4d4dd913b
+vpcId: vpc-060a60655977b64da
 region: us-east-1
