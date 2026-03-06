@@ -7,3 +7,4 @@ server:
 configs:
   params:
     server.insecure: true
+    reposerver.enable.git.submodule: "false"
