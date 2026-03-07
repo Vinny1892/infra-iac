@@ -227,8 +227,7 @@ O script executa 7 passos em sequencia:
 | 4/7  | `generate_values` — Extrai outputs do cluster, escreve nos values do ArgoCD | ~15 seg        |
 | 5/7  | `deploy_helms` — Terragrunt apply no `helms/` (ArgoCD seed + secrets)       | ~2-3 min       |
 | 6/7  | `deploy_root_app` — `kubectl apply` root-app + aguarda sync de todas apps  | ~5-10 min      |
-| 4.5/7| `patch_ingress_routes` — Injeta DNS real do NLB nos manifestos locais      | ~30 seg        |
-| 7/7  | `verify` — Checa pods, services, certificates, DNS                          | ~10 seg        |
+| 7/7  | `verify` — Checa pods, services, ingresses, certificates, DNS               | ~10 seg        |
 
 **Tempo total: ~20-30 minutos** (RDS e o gargalo principal).
 
@@ -333,13 +332,13 @@ k3s/
         │   └── cluster-issuer.yaml     # ClusterIssuer letsencrypt-prod
         ├── argocd/
         │   ├── certificate.yaml        # TLS cert argocd-k3s.vinny.dev.br
-        │   └── ingressroute.yaml       # IngressRoute para ArgoCD UI
+        │   └── ingress.yaml            # Ingress para ArgoCD UI
         └── whoami/
             ├── namespace.yaml
             ├── deployment.yaml          # traefik/whoami:v1.11.0
             ├── service.yaml
             ├── certificate.yaml         # TLS cert k3s.vinny.dev.br
-            └── ingressroute.yaml        # IngressRoute /whoami
+            └── ingress.yaml             # Ingress /whoami
 ```
 
 ---
@@ -393,7 +392,7 @@ Apos o bootstrap, ArgoCD sincroniza automaticamente todos os workloads via App o
 | external-dns         | -1   | external-dns 1.20.0        | external-dns  | DNS automatico via Cloudflare           |
 | traefik              |  0   | traefik 39.0.2             | traefik       | Ingress controller com NLB              |
 | argocd               |  1   | argo-cd 9.4.5              | argocd        | Self-managed (assume config completa)   |
-| argocd-config        |  1.5 | Git manifests              | argocd        | IngressRoute e Certificate para ArgoCD  |
+| argocd-config        |  1.5 | Git manifests              | argocd        | Ingress e Certificate para ArgoCD       |
 | whoami               |  2   | Git manifests              | whoami        | App de validacao (health check)         |
 
 As **sync waves** garantem a ordem de deploy. ArgoCD espera cada wave ficar `Healthy` antes de prosseguir.
@@ -434,13 +433,12 @@ Antes, os registros DNS eram criados pelo Terraform via `module "k3s_domain"` e 
 - Terraform precisa ler o `data.kubernetes_service.traefik` para pegar o hostname do NLB
 - Acoplamento forte: mudanca no Traefik exige `terragrunt apply` para atualizar DNS
 
-Com ExternalDNS:
-- Le a annotation `Host()` das IngressRoutes do Traefik
-- Cria/atualiza CNAME automaticamente no Cloudflare
-- Se uma IngressRoute e deletada, o registro DNS tambem e (policy: sync)
-- Adicionar um dominio novo e so criar uma IngressRoute
-
-**Nota sobre automacao:** Como o Traefik CRD as vezes nao popula o status de forma confiavel, o `deploy.sh` executa o `patch_ingress_routes` para injetar o hostname do NLB real na annotation `external-dns.alpha.kubernetes.io/target` dos manifestos locais (substituindo o placeholder `${TRAEFIK_NLB_HOSTNAME}`) antes de finalizar o sync do ArgoCD.
+Com ExternalDNS (`source: ingress`):
+- Le os hostnames dos recursos `Ingress` padrao (`networking.k8s.io/v1`)
+- Usa o `status.loadBalancer` do Ingress (populado pelo Traefik via `publishedService`) como target do CNAME
+- Cria/atualiza CNAME automaticamente no Cloudflare sem necessidade de anotacoes manuais
+- Se um Ingress e deletado, o registro DNS tambem e (policy: sync)
+- Adicionar um dominio novo e so criar um Ingress com `ingressClassName: traefik`
 
 ### Por que IRSA customizado com Pod Identity Webhook?
 
@@ -578,19 +576,17 @@ kubectl logs -n cert-manager -l app.kubernetes.io/name=cert-manager
 
 **Causas possiveis:**
 - ExternalDNS sem acesso ao Cloudflare
-- IngressRoute sem Host rule
-- Traefik NLB ainda nao provisionado
+- Ingress sem host rule ou sem `ingressClassName: traefik`
+- Traefik NLB ainda nao provisionado (status.loadBalancer vazio)
 
 **Diagnostico:**
 ```bash
 # Verificar ExternalDNS logs
 kubectl logs -n external-dns -l app.kubernetes.io/name=external-dns
 
-# Verificar NLB do Traefik
+# Verificar NLB do Traefik e status dos Ingresses
+kubectl get ingress -A
 kubectl get svc -n traefik traefik -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'
-
-# Verificar IngressRoutes
-kubectl get ingressroute -A
 ```
 
 ### ArgoCD app stuck em "Progressing"
@@ -692,10 +688,12 @@ terragrunt state rm 'data.kubernetes_service.traefik'
 terragrunt state rm 'module.k3s_domain'
 terragrunt state rm 'module.argocd_domain'
 terragrunt state rm kubernetes_manifest.argocd_ingressroute
+terragrunt state rm kubernetes_manifest.argocd_ingress
 terragrunt state rm kubernetes_namespace.whoami
 terragrunt state rm kubernetes_deployment.whoami
 terragrunt state rm kubernetes_service.whoami
 terragrunt state rm kubernetes_manifest.whoami_ingressroute
+terragrunt state rm kubernetes_manifest.whoami_ingress
 ```
 
 ---
