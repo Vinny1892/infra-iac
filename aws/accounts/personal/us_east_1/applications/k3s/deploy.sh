@@ -133,16 +133,16 @@ setup_kubeconfig() {
     exit 1
   fi
 
-  # Merge into ~/.kube/config
+  # Upsert k3s-aws into ~/.kube/config (remove stale entry before merging)
   local kube_dir="$HOME/.kube"
   local kube_config="$kube_dir/config"
   mkdir -p "$kube_dir"
 
   if [[ -f "$kube_config" ]]; then
-    log "Merging kubeconfig into $kube_config..."
-    local backup="$kube_config.bak.$(date +%s)"
-    cp "$kube_config" "$backup"
-    log "Backup saved at $backup"
+    log "Upserting k3s-aws context into $kube_config..."
+    KUBECONFIG="$kube_config" kubectl config delete-context k3s-aws    2>/dev/null || true
+    KUBECONFIG="$kube_config" kubectl config delete-cluster k3s-aws    2>/dev/null || true
+    KUBECONFIG="$kube_config" kubectl config delete-user    k3s-aws-admin 2>/dev/null || true
     KUBECONFIG="$kube_config:$kubeconfig_path" kubectl config view --flatten > "$kube_dir/config_merged"
     mv "$kube_dir/config_merged" "$kube_config"
   else
