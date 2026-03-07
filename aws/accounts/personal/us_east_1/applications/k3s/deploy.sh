@@ -140,9 +140,9 @@ setup_kubeconfig() {
 
   if [[ -f "$kube_config" ]]; then
     log "Upserting k3s-aws context into $kube_config..."
-    KUBECONFIG="$kube_config" kubectl config delete-context k3s-aws    2>/dev/null || true
-    KUBECONFIG="$kube_config" kubectl config delete-cluster k3s-aws    2>/dev/null || true
-    KUBECONFIG="$kube_config" kubectl config delete-user    k3s-aws-admin 2>/dev/null || true
+    KUBECONFIG="$kube_config" kubectl config delete-context k3s-aws 2>/dev/null || true
+    KUBECONFIG="$kube_config" kubectl config delete-cluster k3s-aws 2>/dev/null || true
+    KUBECONFIG="$kube_config" kubectl config delete-user    k3s-aws 2>/dev/null || true
     KUBECONFIG="$kube_config:$kubeconfig_path" kubectl config view --flatten > "$kube_dir/config_merged"
     mv "$kube_dir/config_merged" "$kube_config"
   else
