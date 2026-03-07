@@ -305,7 +305,8 @@ k3s/
 ├── cluster/                            # Terraform — infraestrutura AWS
 │   ├── terragrunt.hcl                  # Inclui o organism k3s/cluster
 │   └── scripts/
-│       └── init-master.tfpl            # User-data template do EC2
+│       ├── init-master.tfpl            # User-data template do EC2 (server)
+│       └── init-worker.tfpl            # User-data template do EC2 (agent)
 │
 ├── helms/                              # Terraform — bootstrap minimo
 │   └── terragrunt.hcl                  # ArgoCD seed + namespaces + secrets
@@ -392,10 +393,10 @@ Apos o bootstrap, ArgoCD sincroniza automaticamente todos os workloads via App o
 | pod-identity-webhook | -3   | Terraform + ArgoCD  | pod-identity-webhook 2.6.0 | kube-system   | IRSA para K3s (injeta AWS credentials)  |
 | aws-lb-controller    | -2   | ArgoCD              | aws-load-balancer 3.1.0    | kube-system   | Provisiona NLBs para Services           |
 | external-dns         | -1   | ArgoCD              | external-dns 1.20.0        | external-dns  | DNS automatico via Cloudflare           |
-| traefik              |  0   | traefik 39.0.2             | traefik       | Ingress controller com NLB              |
-| argocd               |  1   | argo-cd 9.4.5              | argocd        | Self-managed (assume config completa)   |
-| argocd-config        |  1.5 | Git manifests              | argocd        | Ingress e Certificate para ArgoCD       |
-| whoami               |  2   | Git manifests              | whoami        | App de validacao (health check)         |
+| traefik              |  0   | ArgoCD              | traefik 39.0.2             | traefik       | Ingress controller com NLB              |
+| argocd               |  1   | Terraform + ArgoCD  | argo-cd 9.4.5              | argocd        | Self-managed (assume config completa)   |
+| argocd-config        |  5   | ArgoCD              | Git manifests              | argocd        | Ingress e Certificate para ArgoCD       |
+| whoami               |  2   | ArgoCD              | Git manifests              | whoami        | App de validacao (health check)         |
 
 As **sync waves** garantem a ordem de deploy. ArgoCD espera cada wave ficar `Healthy` antes de prosseguir.
 
