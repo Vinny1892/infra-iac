@@ -105,3 +105,57 @@ resource "kubernetes_secret" "argocd_repo_vega" {
 
   depends_on = [helm_release.argocd]
 }
+
+# =============================================================================
+# cert-manager — pre-deployed before ArgoCD App of Apps
+# ArgoCD adopts and manages updates via argocd/apps/cert-manager.yaml
+# =============================================================================
+
+resource "helm_release" "cert_manager" {
+  name       = "cert-manager"
+  repository = "https://charts.jetstack.io"
+  chart      = "cert-manager"
+  version    = "v1.19.4"
+  namespace  = "cert-manager"
+  timeout    = 300
+  wait       = true
+
+  values = [
+    yamlencode({
+      crds = { enabled = true }
+      extraArgs = [
+        "--dns01-recursive-nameservers-only",
+        "--dns01-recursive-nameservers=1.1.1.1:53,1.0.0.1:53"
+      ]
+    })
+  ]
+
+  depends_on = [kubernetes_namespace.cert_manager]
+}
+
+# =============================================================================
+# pod-identity-webhook — pre-deployed before ArgoCD App of Apps
+# Ensures IRSA injection is available when aws-lb-controller first starts.
+# ArgoCD adopts and manages updates via argocd/apps/pod-identity-webhook.yaml
+# =============================================================================
+
+resource "helm_release" "pod_identity_webhook" {
+  name       = "pod-identity-webhook"
+  repository = "https://jkroepke.github.io/helm-charts"
+  chart      = "amazon-eks-pod-identity-webhook"
+  version    = "2.6.0"
+  namespace  = "kube-system"
+  timeout    = 300
+  wait       = true
+
+  values = [
+    yamlencode({
+      fullnameOverride = "pod-identity-webhook"
+      podAnnotations = {
+        "eks.amazonaws.com/skip-pod-identity-webhook" = "true"
+      }
+    })
+  ]
+
+  depends_on = [helm_release.cert_manager]
+}
