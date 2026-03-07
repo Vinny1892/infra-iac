@@ -3,8 +3,6 @@ kind: IngressRoute
 metadata:
   name: argocd
   namespace: argocd
-  annotations:
-    external-dns.alpha.kubernetes.io/target: ${TRAEFIK_NLB_HOSTNAME}
 spec:
   entryPoints:
     - websecure
