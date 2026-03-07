@@ -6,3 +6,15 @@ serviceAccount:
     eks.amazonaws.com/role-arn: arn:aws:iam::036785638465:role/k3s-aws-lb-controller
 vpcId: vpc-060a60655977b64da
 region: us-east-1
+
+extraInitContainers:
+  - name: wait-for-pod-identity-webhook
+    image: busybox:1.36
+    command: ["/bin/sh", "-c"]
+    args:
+      - |
+        until nc -z pod-identity-webhook.kube-system.svc 443 2>/dev/null; do
+          echo "Waiting for pod-identity-webhook to be ready..."
+          sleep 3
+        done
+        echo "pod-identity-webhook is ready."
