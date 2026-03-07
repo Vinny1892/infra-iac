@@ -612,18 +612,24 @@ kubectl -n argocd patch app <nome> -p '{"operation":{"sync":{"revision":"HEAD"}}
 
 ### IRSA nao funciona apos primeiro deploy (AccessDenied no LB Controller)
 
-**Sintoma:** AWS LB Controller com erro `AccessDenied: assumed-role/k3s-node-role is not authorized`.
+> **Este problema foi corrigido automaticamente.** O pod-identity-webhook (wave `-3`) agora sempre sobe antes do aws-lb-controller (wave `-2`), e o lb-controller tem um initContainer que aguarda a porta 443 do webhook antes de iniciar.
 
-**Causa:** O LB Controller foi criado antes do pod-identity-webhook estar pronto. O webhook mutating nao conseguiu injetar as variaveis `AWS_ROLE_ARN` e `AWS_WEB_IDENTITY_TOKEN_FILE` no pod.
+**Sintoma (historico):** AWS LB Controller com erro `AccessDenied: assumed-role/k3s-node-role is not authorized`.
 
-**Solucao:** reiniciar o deployment apos confirmar que o webhook esta rodando:
+**Causa (historica):** O LB Controller foi criado antes do pod-identity-webhook estar pronto. O webhook mutating nao conseguiu injetar as variaveis `AWS_ROLE_ARN` e `AWS_WEB_IDENTITY_TOKEN_FILE` no pod.
+
+**Como verificar que a injecao funcionou corretamente:**
 
 ```bash
-kubectl get pods -n kube-system -l app.kubernetes.io/name=amazon-eks-pod-identity-webhook
-kubectl rollout restart deployment -n kube-system -l app.kubernetes.io/name=aws-load-balancer-controller
-# Verificar injecao:
 kubectl get pod -n kube-system -l app.kubernetes.io/name=aws-load-balancer-controller \
   -o jsonpath='{.items[0].spec.containers[0].env[*].name}' | tr ' ' '\n' | grep AWS_ROLE
+# Deve retornar: AWS_ROLE_ARN e AWS_WEB_IDENTITY_TOKEN_FILE
+```
+
+**Se ainda ocorrer (em casos extremos):**
+
+```bash
+kubectl rollout restart deployment -n kube-system -l app.kubernetes.io/name=aws-load-balancer-controller
 ```
 
 ### ArgoCD nao consegue acessar repositorio (authentication required)

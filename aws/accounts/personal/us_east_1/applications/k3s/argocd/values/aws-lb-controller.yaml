@@ -6,7 +6,6 @@ serviceAccount:
     eks.amazonaws.com/role-arn: arn:aws:iam::036785638465:role/k3s-aws-lb-controller
 vpcId: vpc-060a60655977b64da
 region: us-east-1
-
 extraInitContainers:
   - name: wait-for-pod-identity-webhook
     image: busybox:1.36
