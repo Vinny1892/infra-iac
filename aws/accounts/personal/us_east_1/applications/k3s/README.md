@@ -316,7 +316,8 @@ k3s/
     │   ├── cert-manager.yaml           # wave -5
     │   ├── cert-manager-config.yaml    # wave -4
     │   ├── pod-identity-webhook.yaml   # wave -3
-    │   ├── aws-lb-controller.yaml      # wave -2
+    │   ├── webhook-readiness-gate.yaml # wave -2 (gate: aguarda porta 8443)
+    │   ├── aws-lb-controller.yaml      # wave -1
     │   ├── external-dns.yaml           # wave -1
     │   ├── traefik.yaml                # wave  0
     │   ├── argocd.yaml                 # wave  1
@@ -330,6 +331,8 @@ k3s/
     └── manifests/                      # Raw K8s YAML (nao-Helm)
         ├── cert-manager-config/
         │   └── cluster-issuer.yaml     # ClusterIssuer letsencrypt-prod
+        ├── webhook-gate/
+        │   └── job.yaml                # Job que aguarda porta 8443 do pod-identity-webhook
         ├── argocd/
         │   ├── certificate.yaml        # TLS cert argocd-k3s.vinny.dev.br
         │   └── ingress.yaml            # Ingress para ArgoCD UI
@@ -383,13 +386,14 @@ Bootstrap minimo antes do ArgoCD existir:
 
 Apos o bootstrap, ArgoCD sincroniza automaticamente todos os workloads via App of Apps:
 
-| Application          | Wave | Chart/Source               | Namespace     | Funcao                                  |
-|----------------------|------|----------------------------|---------------|-----------------------------------------|
-| cert-manager         | -5   | cert-manager v1.19.4       | cert-manager  | Emissao automatica de certificados TLS  |
-| cert-manager-config  | -4   | Git manifests              | cert-manager  | ClusterIssuer letsencrypt-prod          |
-| pod-identity-webhook | -3   | pod-identity-webhook 2.6.0 | kube-system   | IRSA para K3s (injeta AWS credentials)  |
-| aws-lb-controller    | -2   | aws-lb-controller 3.1.0    | kube-system   | Provisiona NLBs para Services           |
-| external-dns         | -1   | external-dns 1.20.0        | external-dns  | DNS automatico via Cloudflare           |
+| Application              | Wave | Chart/Source               | Namespace     | Funcao                                          |
+|--------------------------|------|----------------------------|---------------|-------------------------------------------------|
+| cert-manager             | -5   | cert-manager v1.19.4       | cert-manager  | Emissao automatica de certificados TLS          |
+| cert-manager-config      | -4   | Git manifests              | cert-manager  | ClusterIssuer letsencrypt-prod                  |
+| pod-identity-webhook     | -3   | pod-identity-webhook 2.6.0 | kube-system   | IRSA para K3s (injeta AWS credentials)          |
+| webhook-readiness-gate   | -2   | Git manifests (Job)        | kube-system   | Gate: aguarda porta 8443 do webhook estar pronta|
+| aws-lb-controller        | -1   | aws-load-balancer 3.1.0    | kube-system   | Provisiona NLBs para Services                   |
+| external-dns             | -1   | external-dns 1.20.0        | external-dns  | DNS automatico via Cloudflare                   |
 | traefik              |  0   | traefik 39.0.2             | traefik       | Ingress controller com NLB              |
 | argocd               |  1   | argo-cd 9.4.5              | argocd        | Self-managed (assume config completa)   |
 | argocd-config        |  1.5 | Git manifests              | argocd        | Ingress e Certificate para ArgoCD       |
@@ -612,11 +616,14 @@ kubectl -n argocd patch app <nome> -p '{"operation":{"sync":{"revision":"HEAD"}}
 
 ### IRSA nao funciona apos primeiro deploy (AccessDenied no LB Controller)
 
-> **Este problema foi corrigido automaticamente.** O pod-identity-webhook (wave `-3`) agora sempre sobe antes do aws-lb-controller (wave `-2`), e o lb-controller tem um initContainer que aguarda a porta 443 do webhook antes de iniciar.
+> **Este problema foi corrigido automaticamente** pelo `webhook-readiness-gate` (wave `-2`).
 
-**Sintoma (historico):** AWS LB Controller com erro `AccessDenied: assumed-role/k3s-node-role is not authorized`.
+**Como funciona o gate:**
+1. Wave `-3`: pod-identity-webhook sobe
+2. Wave `-2`: `webhook-readiness-gate` — Job que faz `curl -sk https://pod-identity-webhook.kube-system.svc:8443` em loop ate a porta responder. ArgoCD so avanca para a proxima wave quando o Job completa com sucesso.
+3. Wave `-1`: aws-lb-controller — webhook ja esta aceitando conexoes, injecao IRSA garantida
 
-**Causa (historica):** O LB Controller foi criado antes do pod-identity-webhook estar pronto. O webhook mutating nao conseguiu injetar as variaveis `AWS_ROLE_ARN` e `AWS_WEB_IDENTITY_TOKEN_FILE` no pod.
+**Por que wave ordering sozinho nao era suficiente:** o `MutatingWebhookConfiguration` do pod-identity-webhook tem `failurePolicy: Ignore`. Mesmo que o pod estivesse `Running`, se a porta ainda nao estivesse pronta no momento exato da criacao dos pods do lb-controller, a mutacao era silenciosamente ignorada e o pod subia sem `AWS_ROLE_ARN`.
 
 **Como verificar que a injecao funcionou corretamente:**
 
@@ -626,9 +633,12 @@ kubectl get pod -n kube-system -l app.kubernetes.io/name=aws-load-balancer-contr
 # Deve retornar: AWS_ROLE_ARN e AWS_WEB_IDENTITY_TOKEN_FILE
 ```
 
-**Se ainda ocorrer (em casos extremos):**
+**Se ainda ocorrer:**
 
 ```bash
+# Verificar se o Job do gate completou com sucesso
+kubectl get job wait-for-pod-identity-webhook -n kube-system
+# Se falhou, reiniciar o lb-controller apos confirmar que o webhook esta rodando
 kubectl rollout restart deployment -n kube-system -l app.kubernetes.io/name=aws-load-balancer-controller
 ```
 
