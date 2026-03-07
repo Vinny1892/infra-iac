@@ -18,5 +18,5 @@ spec:
                   number: 80
   tls:
     - hosts:
-        - argocd-k3s.vinny.dev.br
+        - aargocd-k3s.vinny.dev.br
       secretName: argocd-k3s-tls

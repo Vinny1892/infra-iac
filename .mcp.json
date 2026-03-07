@@ -1,0 +1,24 @@
+{
+  "mcpServers": {
+    "awslabs.ec2-mcp-server": {
+      "command": "uvx",
+      "args": ["--from", "awslabs.ec2-mcp-server", "ec2-mcp-server"],
+      "env": {
+        "AWS_PROFILE": "personal",
+        "AWS_REGION": "us-east-1",
+        "FASTMCP_LOG_LEVEL": "ERROR",
+        "ALLOW_WRITE": "false",
+        "ALLOW_SENSITIVE_DATA": "false"
+      }
+    },
+    "terraform": {
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "hashicorp/terraform-mcp-server:latest"
+      ]
+    }
+  }
+}
