@@ -1,0 +1,6 @@
+# ai-jail sandbox configuration
+# Edit freely. Regenerate with: ai-jail --clean --init
+
+command = ["gemini","claude"]
+rw_maps = []
+ro_maps = []
