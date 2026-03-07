@@ -232,7 +232,7 @@ deploy_helms() {
 deploy_root_app() {
   log "=== Step 6/7: Deploying ArgoCD App of Apps ==="
 
-  kubectl apply -f "$ARGOCD_DIR/root-app.yaml"
+  kubectl apply --validate=false -f "$ARGOCD_DIR/root-app.yaml"
 
   log "Root app applied. Waiting for ArgoCD to sync all applications..."
 
@@ -374,9 +374,7 @@ main() {
     destroy)
       check_prerequisites
       warn "=== Step 1/4: Deleting ArgoCD Applications ==="
-      kubectl delete applications -n argocd --all --wait=true 2>/dev/null || warn "No ArgoCD applications found or cluster unreachable."
-      log "Waiting 30s for controllers to clean up resources..."
-      sleep 30
+      # kubectl delete applications -n argocd --all --wait=true 2>/dev/null || warn "No ArgoCD applications found or cluster unreachable."
       warn "=== Step 2/4: Pre-destroy cleanup (K8s-spawned AWS resources) ==="
       "$SCRIPT_DIR/pre-destroy.sh"
       warn "=== Step 3/4: Destroying Helm releases (ArgoCD seed + secrets) ==="
@@ -390,6 +388,7 @@ main() {
       exit 1
       ;;
   esac
+  
 }
 
 main "$@"

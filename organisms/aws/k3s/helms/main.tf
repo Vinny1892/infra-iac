@@ -60,8 +60,9 @@ resource "helm_release" "argocd" {
   namespace        = "argocd"
   create_namespace = true
   timeout          = 600
-  wait             = true
-
+  wait             = false
+  wait_for_jobs    = false
+  
   set {
     name  = "server.service.type"
     value = "ClusterIP"
