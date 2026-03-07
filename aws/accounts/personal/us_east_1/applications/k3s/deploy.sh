@@ -186,36 +186,6 @@ generate_values() {
   log "Values generated. Commit and push these files before deploying ArgoCD apps."
 }
 
-patch_ingress_routes() {
-  log "=== Step 4.5/7: Patching IngressRoute manifests with NLB hostname ==="
-
-  local max_attempts=30
-  local attempt=0
-  local traefik_lb=""
-
-  log "Waiting for Traefik NLB assignment..."
-  while [[ $attempt -lt $max_attempts ]]; do
-    traefik_lb=$(kubectl -n traefik get svc traefik -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
-    if [[ -n "$traefik_lb" ]]; then
-      log "Traefik NLB found: $traefik_lb"
-      break
-    fi
-    attempt=$((attempt + 1))
-    echo -n "."
-    sleep 10
-  done
-
-  if [[ -z "$traefik_lb" ]]; then
-    err "Timeout waiting for Traefik NLB. Cannot patch IngressRoutes."
-    return 1
-  fi
-
-  # Replace placeholders in manifests
-  # Usamos sed para substituir ${TRAEFIK_NLB_HOSTNAME} pelo valor real nos arquivos
-  find "$ARGOCD_DIR/manifests" -name "ingressroute.yaml" -exec sed -i "s/\${TRAEFIK_NLB_HOSTNAME}/$traefik_lb/g" {} +
-
-  log "Manifests patched with current NLB hostname."
-}
 
 deploy_helms() {
   log "=== Step 5/7: Deploying ArgoCD seed + secrets bootstrap ==="
@@ -307,8 +277,8 @@ verify() {
   log "Checking Certificates..."
   kubectl get certificates -A --no-headers 2>/dev/null || warn "No certificates found yet."
 
-  log "Checking IngressRoutes..."
-  kubectl get ingressroute -A --no-headers 2>/dev/null || warn "IngressRoute CRD not found yet."
+  log "Checking Ingresses..."
+  kubectl get ingress -A --no-headers 2>/dev/null || warn "No ingresses found yet."
 
   log "Checking DNS..."
   if command -v dig >/dev/null 2>&1; then
@@ -347,7 +317,6 @@ main() {
       generate_values
       deploy_helms
       deploy_root_app
-      patch_ingress_routes
       verify
       ;;
     cluster-only)

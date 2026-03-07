@@ -8,7 +8,7 @@ env:
         key: api-token
 
 sources:
-  - traefik-proxy
+  - ingress
 
 domainFilters:
   - vinny.dev.br
