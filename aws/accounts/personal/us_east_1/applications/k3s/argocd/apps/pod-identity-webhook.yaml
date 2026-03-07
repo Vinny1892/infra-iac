@@ -4,7 +4,7 @@ metadata:
   name: pod-identity-webhook
   namespace: argocd
   annotations:
-    argocd.argoproj.io/sync-wave: "-10"
+    argocd.argoproj.io/sync-wave: "-3"
   finalizers:
     - resources-finalizer.argocd.argoproj.io
 spec:
