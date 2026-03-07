@@ -57,10 +57,10 @@ Cluster Kubernetes leve (K3s) rodando em EC2 na AWS, com RDS PostgreSQL como dat
 Terraform (cluster/)             Terraform (helms/)              ArgoCD (GitOps, auto-sync)
 ─────────────────────            ────────────────────            ──────────────────────────
 EC2, RDS, NLB, IAM, OIDC   →    ArgoCD seed install        →   App of Apps gerencia:
-Security Groups, IRSA roles      Namespaces + Secrets             cert-manager, pod-identity,
-                                                                  aws-lb-controller, external-dns,
-                                                                  traefik, argocd (self-managed),
-                                                                  whoami
+Security Groups, IRSA roles      Namespaces + Secrets             aws-lb-controller, external-dns,
+                                 cert-manager (wait=true)         traefik, argocd (self-managed),
+                                 pod-identity-webhook             whoami
+                                 (wait=true)
 ```
 
 ---
@@ -367,17 +367,19 @@ Cria toda a infraestrutura AWS:
 
 ### Terraform — `helms/`
 
-Bootstrap minimo antes do ArgoCD existir:
+Bootstrap antes do ArgoCD App of Apps existir:
 
-| Recurso                                      | Descricao                                                      |
-|----------------------------------------------|----------------------------------------------------------------|
-| `helm_release.argocd`                                         | Instalacao seed do ArgoCD (config minima)                                    |
-| `kubernetes_namespace.cert_manager`                           | Namespace cert-manager                                                       |
-| `kubernetes_secret.cloudflare_api_token`                      | Token Cloudflare para cert-manager                                           |
-| `kubernetes_namespace.external_dns`                           | Namespace external-dns                                                       |
-| `kubernetes_secret.cloudflare_api_token_eds`                  | Token Cloudflare para ExternalDNS                                            |
-| `data.aws_secretsmanager_secret_version.github_app_private_key` | Le chave privada do GitHub App no Secrets Manager                          |
-| `kubernetes_secret.argocd_repo_vega`                          | Secret tipo `repository` com GitHub App credentials para ArgoCD             |
+| Recurso                                                          | Descricao                                                                    |
+|------------------------------------------------------------------|------------------------------------------------------------------------------|
+| `helm_release.argocd`                                            | Instalacao seed do ArgoCD (config minima)                                    |
+| `kubernetes_namespace.cert_manager`                              | Namespace cert-manager                                                       |
+| `kubernetes_secret.cloudflare_api_token`                         | Token Cloudflare para cert-manager                                           |
+| `kubernetes_namespace.external_dns`                              | Namespace external-dns                                                       |
+| `kubernetes_secret.cloudflare_api_token_eds`                     | Token Cloudflare para ExternalDNS                                            |
+| `data.aws_secretsmanager_secret_version.github_app_private_key`  | Le chave privada do GitHub App no Secrets Manager                            |
+| `kubernetes_secret.argocd_repo_vega`                             | Secret tipo `repository` com GitHub App credentials para ArgoCD             |
+| `helm_release.cert_manager`                                      | cert-manager pre-instalado com `wait=true` — ArgoCD adota e gerencia updates |
+| `helm_release.pod_identity_webhook`                              | pod-identity-webhook pre-instalado com `wait=true` — garante IRSA disponivel |
 
 ### ArgoCD — `argocd/`
 
@@ -688,9 +690,7 @@ Commit e push. O ArgoCD ira ignorar esses submodules no checkout.
 **Solucao:**
 ```bash
 cd helms/
-terragrunt state rm helm_release.cert_manager
 terragrunt state rm kubernetes_manifest.cluster_issuer
-terragrunt state rm helm_release.pod_identity_webhook
 terragrunt state rm helm_release.aws_lb_controller
 terragrunt state rm helm_release.traefik
 terragrunt state rm kubernetes_manifest.cert_argocd
