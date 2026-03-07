@@ -212,7 +212,7 @@ deploy_root_app() {
 wait_for_sync() {
   local max_attempts=60
   local attempt=0
-  local expected_apps=8
+  local expected_apps=9
 
   while [[ $attempt -lt $max_attempts ]]; do
     local synced_healthy
