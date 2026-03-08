@@ -127,6 +127,8 @@ tests/
 | `TestNetworkMoleculeValidate` | `molecules/aws/network` | Validate |
 | `TestNetworkMoleculePlan` | `molecules/aws/network` | Plan |
 | `TestK3sOrganismValidate` | `organisms/aws/k3s/cluster` | Validate |
+| `TestWireguardValidate` | `ec2/wireguard` (inline unit) | Validate |
+| `TestWireguardPlan` | `ec2/wireguard` (inline unit) | Plan |
 
 ### Tipos de teste
 
@@ -236,7 +238,7 @@ O código que gera o relatório está em `tests/cmd/coverage/main.go`. Ele:
 3. Analisa os arquivos de teste para identificar chamadas a `terraform.Validate` e `InitAndPlanAndShowWithStruct`
 4. Gera o HTML com filtros interativos por layer e status de cobertura
 
-Estado atual da cobertura (26%):
+Estado atual da cobertura:
 
 | Layer | Módulo | Validate | Plan |
 |---|---|---|---|
@@ -246,6 +248,7 @@ Estado atual da cobertura (26%):
 | Atom | `aws/ecs/task` | ✓ | ✓ |
 | Molecule | `aws/network` | ✓ | ✓ |
 | Organism | `aws/k3s/cluster` | ✓ | — |
+| Inline unit | `ec2/wireguard` | ✓ | ✓ |
 | Atom | `aws/ecs/service` | — | — |
 | Atom | `aws/eks` | — | — |
 | Atom | `aws/cloud_map/*` | — | — |
