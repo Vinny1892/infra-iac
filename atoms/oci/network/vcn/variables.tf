@@ -29,3 +29,61 @@ variable "availability_domains" {
   description = "Lista de Availability Domains para distribuir subnets"
   type        = list(string)
 }
+
+variable "ssh_allowed_cidr" {
+  description = "CIDR permitido para acesso SSH"
+  type        = string
+  default     = "0.0.0.0/0"
+}
+
+variable "ssh_port" {
+  description = "Porta SSH"
+  type        = number
+  default     = 22
+}
+
+variable "additional_ingress_rules" {
+  description = "Regras extras de ingress para a security list padrão"
+  type = list(object({
+    source      = string
+    protocol    = string
+    description = optional(string)
+    stateless   = optional(bool, false)
+    tcp_options = optional(object({
+      min = number
+      max = number
+    }))
+    udp_options = optional(object({
+      min = number
+      max = number
+    }))
+    icmp_options = optional(object({
+      type = number
+      code = optional(number)
+    }))
+  }))
+  default = []
+}
+
+variable "additional_egress_rules" {
+  description = "Regras extras de egress para a security list padrão"
+  type = list(object({
+    destination = string
+    protocol    = string
+    description = optional(string)
+    stateless   = optional(bool, false)
+    tcp_options = optional(object({
+      min = number
+      max = number
+    }))
+    udp_options = optional(object({
+      min = number
+      max = number
+    }))
+    icmp_options = optional(object({
+      type = number
+      code = optional(number)
+    }))
+  }))
+  default = []
+}

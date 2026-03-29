@@ -13,6 +13,18 @@ variable "subnet_id" {
   type        = string
 }
 
+variable "primary_subnet_id" {
+  description = "OCID da subnet primária. Se vazio, usa subnet_id por compatibilidade."
+  type        = string
+  default     = ""
+}
+
+variable "secondary_vnic_subnet_ids" {
+  description = "Subnets adicionais para anexar VNICs secundárias"
+  type        = list(string)
+  default     = []
+}
+
 variable "instance_name" {
   description = "Nome da instância"
   type        = string
@@ -47,3 +59,34 @@ variable "ssh_public_key_path" {
   type        = string
   default     = "~/.ssh/id_ed25519.pub"
 }
+
+variable "ssh_port" {
+  description = "Porta SSH configurada no sshd_config via cloud-init"
+  type        = number
+  default     = 22
+}
+
+variable "assign_public_ip" {
+  description = "Define se a VNIC primária recebe IP público"
+  type        = bool
+  default     = true
+}
+
+variable "user_data_base64" {
+  description = "Cloud-init ou script de bootstrap em base64"
+  type        = string
+  default     = null
+}
+
+variable "marketplace_listing_id" {
+  description = "OCID do listing do Marketplace OCI (deixe vazio para imagens padrão)"
+  type        = string
+  default     = ""
+}
+
+variable "marketplace_listing_version" {
+  description = "Versão do listing do Marketplace OCI"
+  type        = string
+  default     = ""
+}
+
