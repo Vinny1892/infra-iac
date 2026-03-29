@@ -9,4 +9,4 @@ spec:
     name: letsencrypt-prod
     kind: ClusterIssuer
   dnsNames:
-    - aargocd-k3s.vinny.dev.br
+    - argocd-k3s.vinny.dev.br
