@@ -1,0 +1,20 @@
+provider: cloudflare
+
+env:
+  - name: CF_API_TOKEN
+    valueFrom:
+      secretKeyRef:
+        name: cloudflare-api-token
+        key: api-token
+
+sources:
+  - ingress
+
+domainFilters:
+  - vinny.dev.br
+
+policy: sync
+
+registry: txt
+txtOwnerId: k3s-oci
+txtPrefix: "_externaldns."

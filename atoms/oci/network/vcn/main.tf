@@ -54,9 +54,90 @@ resource "oci_core_security_list" "default" {
   }
 
   ingress_security_rules {
-    source    = "0.0.0.0/0"
-    protocol  = "all"
+    source    = var.ssh_allowed_cidr
+    protocol  = "6" # TCP
     stateless = false
+
+    tcp_options {
+      min = var.ssh_port
+      max = var.ssh_port
+    }
+  }
+
+  dynamic "ingress_security_rules" {
+    for_each = var.additional_ingress_rules
+
+    content {
+      source      = ingress_security_rules.value.source
+      protocol    = ingress_security_rules.value.protocol
+      description = try(ingress_security_rules.value.description, null)
+      stateless   = try(ingress_security_rules.value.stateless, false)
+
+      dynamic "tcp_options" {
+        for_each = try(ingress_security_rules.value.tcp_options, null) != null ? [ingress_security_rules.value.tcp_options] : []
+
+        content {
+          min = tcp_options.value.min
+          max = tcp_options.value.max
+        }
+      }
+
+      dynamic "udp_options" {
+        for_each = try(ingress_security_rules.value.udp_options, null) != null ? [ingress_security_rules.value.udp_options] : []
+
+        content {
+          min = udp_options.value.min
+          max = udp_options.value.max
+        }
+      }
+
+      dynamic "icmp_options" {
+        for_each = try(ingress_security_rules.value.icmp_options, null) != null ? [ingress_security_rules.value.icmp_options] : []
+
+        content {
+          type = icmp_options.value.type
+          code = try(icmp_options.value.code, null)
+        }
+      }
+    }
+  }
+
+  dynamic "egress_security_rules" {
+    for_each = var.additional_egress_rules
+
+    content {
+      destination = egress_security_rules.value.destination
+      protocol    = egress_security_rules.value.protocol
+      description = try(egress_security_rules.value.description, null)
+      stateless   = try(egress_security_rules.value.stateless, false)
+
+      dynamic "tcp_options" {
+        for_each = try(egress_security_rules.value.tcp_options, null) != null ? [egress_security_rules.value.tcp_options] : []
+
+        content {
+          min = tcp_options.value.min
+          max = tcp_options.value.max
+        }
+      }
+
+      dynamic "udp_options" {
+        for_each = try(egress_security_rules.value.udp_options, null) != null ? [egress_security_rules.value.udp_options] : []
+
+        content {
+          min = udp_options.value.min
+          max = udp_options.value.max
+        }
+      }
+
+      dynamic "icmp_options" {
+        for_each = try(egress_security_rules.value.icmp_options, null) != null ? [egress_security_rules.value.icmp_options] : []
+
+        content {
+          type = icmp_options.value.type
+          code = try(icmp_options.value.code, null)
+        }
+      }
+    }
   }
 }
 

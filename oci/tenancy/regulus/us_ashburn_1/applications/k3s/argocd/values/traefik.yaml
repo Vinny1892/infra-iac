@@ -1,0 +1,25 @@
+deployment:
+  kind: DaemonSet
+
+service:
+  type: ClusterIP
+
+ports:
+  web:
+    hostPort: 80
+    redirectTo:
+      port: websecure
+  websecure:
+    hostPort: 443
+
+providers:
+  kubernetesCRD:
+    enabled: true
+  kubernetesIngress:
+    enabled: true
+    publishedService:
+      enabled: true
+
+logs:
+  general:
+    level: INFO
