@@ -28,6 +28,7 @@ spec:
       jsonPointers:
         - /status
         - /metadata/annotations
+        - /metadata/labels/longhorn-manager
         - /spec/conversion
   syncPolicy:
     automated:
