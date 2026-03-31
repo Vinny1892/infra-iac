@@ -1,7 +1,7 @@
 apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
-  name: k3s-vinny-dev-br
+  name: whoami-vinny-dev-br
   namespace: whoami
 spec:
   secretName: k3s-tls
@@ -9,4 +9,4 @@ spec:
     name: letsencrypt-prod
     kind: ClusterIssuer
   dnsNames:
-    - k3s.vinny.dev.br
+    - whoami.vinny.dev.br
