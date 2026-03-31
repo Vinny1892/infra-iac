@@ -1,4 +1,5 @@
 provider: cloudflare
+cloudflareProxied: true
 
 env:
   - name: CF_API_TOKEN
