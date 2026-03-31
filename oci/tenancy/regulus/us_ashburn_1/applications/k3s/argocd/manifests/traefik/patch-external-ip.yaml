@@ -1,0 +1,36 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: traefik-patch-external-ip
+  namespace: traefik
+spec:
+  schedule: "*/5 * * * *"
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      ttlSecondsAfterFinished: 60
+      template:
+        spec:
+          serviceAccountName: traefik-external-ip-patcher
+          restartPolicy: OnFailure
+          containers:
+            - name: patcher
+              image: bitnami/kubectl:latest
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  NODE_IP=$(kubectl get node -o jsonpath='{.items[0].status.addresses[?(@.type=="ExternalIP")].address}')
+                  if [ -z "$NODE_IP" ]; then
+                    echo "ERROR: no ExternalIP found on node"
+                    exit 1
+                  fi
+                  CURRENT=$(kubectl get svc traefik -n traefik -o jsonpath='{.spec.externalIPs[0]}' 2>/dev/null)
+                  if [ "$CURRENT" = "$NODE_IP" ]; then
+                    echo "externalIPs already set to $NODE_IP, nothing to do"
+                    exit 0
+                  fi
+                  echo "Patching traefik service externalIPs to $NODE_IP"
+                  kubectl patch svc traefik -n traefik --type=merge \
+                    -p "{\"spec\":{\"externalIPs\":[\"$NODE_IP\"]}}"
