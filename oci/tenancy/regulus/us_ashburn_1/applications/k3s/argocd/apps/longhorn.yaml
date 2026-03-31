@@ -22,15 +22,6 @@ spec:
   destination:
     server: https://kubernetes.default.svc
     namespace: longhorn-system
-  ignoreDifferences:
-    - group: apiextensions.k8s.io
-      kind: CustomResourceDefinition
-      managedFieldsManagers:
-        - longhorn-manager
-      jsonPointers:
-        - /status
-        - /metadata/annotations
-        - /spec/conversion
   syncPolicy:
     automated:
       prune: true
@@ -38,4 +29,3 @@ spec:
     syncOptions:
       - CreateNamespace=true
       - ServerSideApply=true
-      - RespectIgnoreDifferences=true
