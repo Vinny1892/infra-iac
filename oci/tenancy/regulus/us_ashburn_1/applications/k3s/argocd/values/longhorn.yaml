@@ -1,2 +1,5 @@
 defaultSettings:
   defaultReplicaCount: 1
+
+preUpgradeChecker:
+  jobEnabled: false
