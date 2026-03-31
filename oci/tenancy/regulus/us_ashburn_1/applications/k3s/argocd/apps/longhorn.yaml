@@ -27,6 +27,8 @@ spec:
       kind: CustomResourceDefinition
       managedFieldsManagers:
         - longhorn-manager
+        - terraform-provider-helm_v2.17.0_x5
+        - k3s
   syncPolicy:
     automated:
       prune: true
