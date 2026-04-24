@@ -157,11 +157,10 @@ export GITHUB_APP_INSTALL_ID="<installation_id>"
 - `root.hcl`: Centralized backend and state configuration.
 - `CLAUDE.md`: Detailed guidance on commands and architecture.
 - `README.md`: High-level overview and dependency chain.
-- **ECS services**: Loki (log aggregation), Apache Superset (analytics).
+- **ECS services**: Apache Superset (analytics).
 - **EC2 instances**: Minecraft server, Postgres (AWS + Cloudflare), K3S nodes, OpenClaw.
 
 ### Special Case Configurations
-- **Loki staging/production**: Different provider tags (`shared-services`).
 - **EKS helms**: Uses AWS profile `sandim-account`.
 - **Postgres**: Cross-provider unit (AWS + Cloudflare).
 

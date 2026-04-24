@@ -135,7 +135,7 @@ Managed via Terragrunt `dependency` blocks (automatic ordering with `run-all`):
 
 ### Applications
 
-**ECS services:** Loki (log aggregation), Apache Superset (analytics)
+**ECS services:** Apache Superset (analytics)
 **EC2 instances:** Minecraft server, Postgres database, K3S server/agent nodes, OpenClaw
 
 ### Terraform Backend
@@ -150,7 +150,6 @@ All state stored in S3 with DynamoDB locking (configured in `root.hcl`):
 
 ### Special Cases
 
-- **Loki staging/production**: Different provider tags (`shared-services`)
 - **EKS helms**: Uses AWS profile `sandim-account`; helm provider configured locally (depends on data source)
 - **GCP cluster-teste**: kubernetes provider configured locally (depends on module output)
 - **Postgres**: Cross-provider unit (AWS + Cloudflare)
