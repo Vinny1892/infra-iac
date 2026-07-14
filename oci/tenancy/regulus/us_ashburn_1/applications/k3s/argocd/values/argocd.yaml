@@ -4,4 +4,21 @@ server:
 configs:
   params:
     server.insecure: true
+    server.url: https://argocd-k3s.vinny.dev.br
     reposerver.enable.git.submodule: "false"
+  cm:
+    url: https://argocd-k3s.vinny.dev.br
+    dex.config: |
+      connectors:
+      - type: github
+        id: github
+        name: GitHub
+        config:
+          clientID: $dex.github.clientID
+          clientSecret: $dex.github.clientSecret
+          orgs:
+          - name: Vinny1892
+  rbac:
+    policy.default: role:readonly
+    policy.csv: |
+      g, Vinny1892, role:admin

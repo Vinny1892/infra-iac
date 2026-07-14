@@ -156,22 +156,26 @@ All state stored in S3 with DynamoDB locking (configured in `root.hcl`):
 
 ### Credentials & Environment Setup
 
-Before running any `terragrunt` or `aws` command locally, export the required environment variables:
-
+**AWS**: export the AWS CLI profile:
 ```bash
-export AWS_PROFILE=personal          # selects the AWS CLI profile for the personal account
-export CLOUDFLARE_API_TOKEN=<token>  # Cloudflare API token (stored in ~/.bashrc)
+export AWS_PROFILE=personal
 ```
 
-For the K3s `helms/` unit (ArgoCD bootstrap with GitHub App):
+**Secrets (Cloudflare, GitHub App)**: stored in **1Password vault `Lab-IAC`** and read at runtime via `op read` (Terragrunt `run_cmd()`). No env vars needed — just authenticate the `op` CLI:
 
 ```bash
-export GITHUB_OWNER="Vinny1892"
-export GITHUB_APP_ID="<app_id>"
-export GITHUB_APP_INSTALL_ID="<installation_id>"
+# Service Account (CI/headless):
+export OP_SERVICE_ACCOUNT_TOKEN="<token>"
+
+# Interactive:
+eval $(op signin)
 ```
 
-Without these, provider auth will fail for AWS and Cloudflare. Both are defined in `~/.bashrc` via the `load_tf_vinny_root` shell function as a convenience shortcut.
+**1Password items in vault `Lab-IAC`:**
+- `Cloudflare API Token` — field `credential` (used by cert-manager and external-dns K8s secrets)
+- `GitHub App` — fields `owner`, `app_id`, `installation_id`, `repo_name`, `private_key` (used by ArgoCD repo auth)
+
+The `deploy.sh` script validates `op` CLI auth before running (preflight check).
 
 ### K3s Cluster Lifecycle
 

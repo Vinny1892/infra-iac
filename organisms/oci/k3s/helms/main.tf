@@ -197,11 +197,23 @@ resource "helm_release" "argocd" {
     value = "ClusterIP"
   }
 
-  # TLS terminated at Traefik — ArgoCD serves plain HTTP
   set {
     name  = "configs.params.server\\.insecure"
     value = "true"
   }
+
+  values = [
+    yamlencode({
+      configs = {
+        secret = {
+          extra = {
+            "dex.github.clientID"     = var.github_oauth_client_id
+            "dex.github.clientSecret" = var.github_oauth_client_secret
+          }
+        }
+      }
+    })
+  ]
 
   depends_on = [helm_release.longhorn]
 }

@@ -67,8 +67,8 @@ dependency "k3s_cluster" {
 
 inputs = {
   argocd_role_arn            = dependency.k3s_cluster.outputs.argocd_role_arn
-  github_owner               = get_env("GITHUB_OWNER", "")
-  github_app_id              = get_env("GITHUB_APP_ID", "")
-  github_app_installation_id = get_env("GITHUB_APP_INSTALL_ID", "")
-  github_repo_name           = get_env("GITHUB_REPO_NAME", "infra-iac")
+  github_owner               = run_cmd("op", "read", "op://Lab-IAC/GitHub App/owner")
+  github_app_id              = run_cmd("op", "read", "op://Lab-IAC/GitHub App/app_id")
+  github_app_installation_id = run_cmd("op", "read", "op://Lab-IAC/GitHub App/installation_id")
+  github_repo_name           = run_cmd("op", "read", "op://Lab-IAC/GitHub App/repo_name")
 }

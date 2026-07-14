@@ -39,11 +39,13 @@ EOF
 
 inputs = {
   kubeconfig_path            = get_env("K3S_OCI_KUBECONFIG", "~/.kube/k3s-oci.yaml")
-  cloudflare_api_token       = get_env("CLOUDFLARE_API_TOKEN", "")
-  github_owner               = get_env("GITHUB_OWNER", "")
-  github_app_id              = get_env("GITHUB_APP_ID", "")
-  github_app_installation_id = get_env("GITHUB_APP_INSTALL_ID", "")
-  github_repo_name           = get_env("GITHUB_REPO_NAME", "infra-iac")
-  github_app_private_key     = get_env("GITHUB_APP_PRIVATE_KEY", "")
+  cloudflare_api_token       = run_cmd("op", "read", "op://Lab-IAC/Cloudflare API Token/credential")
+  github_owner               = run_cmd("op", "read", "op://Lab-IAC/GitHub App/owner")
+  github_app_id              = run_cmd("op", "read", "op://Lab-IAC/GitHub App/app_id")
+  github_app_installation_id = run_cmd("op", "read", "op://Lab-IAC/GitHub App/installation_id")
+  github_repo_name           = run_cmd("op", "read", "op://Lab-IAC/GitHub App/repo_name")
+  github_app_private_key     = run_cmd("op", "read", "op://Lab-IAC/GitHub App/private_key")
+  github_oauth_client_id     = run_cmd("op", "read", "op://Lab-IAC/GitHub OAuth ArgoCD/client_id")
+  github_oauth_client_secret = run_cmd("op", "read", "op://Lab-IAC/GitHub OAuth ArgoCD/client_secret")
   vm_public_ip               = dependency.vm.outputs.instance_public_ip
 }

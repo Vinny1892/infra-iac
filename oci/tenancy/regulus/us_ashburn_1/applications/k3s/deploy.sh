@@ -9,6 +9,14 @@ SSH_PORT="22"
 SSH_USER="ubuntu"
 KUBECONFIG_PATH="${K3S_OCI_KUBECONFIG:-$HOME/.kube/k3s-oci.yaml}"
 
+preflight_check() {
+  if ! op vault list &>/dev/null; then
+    echo "ERROR: 1Password CLI nao esta autenticado."
+    echo "  Exporte OP_SERVICE_ACCOUNT_TOKEN ou rode: eval \$(op signin)"
+    exit 1
+  fi
+}
+
 get_vm_ip() {
   terragrunt output -raw instance_public_ip 2>/dev/null
 }
@@ -138,6 +146,7 @@ MODE="${1:-deploy}"
 
 case "$MODE" in
   deploy)
+    preflight_check
     provision_vm
     VM_IP=$(wait_for_k3s)
     fetch_kubeconfig "$VM_IP"
@@ -146,6 +155,7 @@ case "$MODE" in
     verify
     ;;
   helms-only)
+    preflight_check
     deploy_helms
     deploy_root_app
     ;;
@@ -153,6 +163,7 @@ case "$MODE" in
     verify
     ;;
   destroy)
+    preflight_check
     destroy
     ;;
   *)
