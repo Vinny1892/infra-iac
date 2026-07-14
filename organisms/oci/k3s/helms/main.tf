@@ -47,6 +47,16 @@ resource "null_resource" "metallb_config" {
         sleep 5
       done
 
+      # Wait for MetalLB webhook to be ready
+      for i in $(seq 1 60); do
+        if kubectl --kubeconfig "${var.kubeconfig_path}" -n metallb-system get endpoints metallb-webhook-service -o jsonpath='{.subsets[0].addresses[0].ip}' 2>/dev/null | grep -q .; then
+          echo "MetalLB webhook ready."
+          break
+        fi
+        echo "Waiting for MetalLB webhook... ($i/60)"
+        sleep 5
+      done
+
       kubectl --kubeconfig "${var.kubeconfig_path}" apply -f - <<'EOF'
 apiVersion: metallb.io/v1beta1
 kind: IPAddressPool

@@ -47,7 +47,6 @@ fetch_kubeconfig() {
   echo "==> Buscando kubeconfig da VM..."
   mkdir -p "$(dirname "$KUBECONFIG_PATH")"
 
-  # Wait for SSH to be ready with retries
   local retries=20
   local success=false
   for i in $(seq 1 $retries); do
@@ -75,8 +74,33 @@ deploy_dns() {
   terragrunt apply --auto-approve
 }
 
+# Clean up stuck Terraform state locks and pending Helm releases
+cleanup_helms_state() {
+  echo "==> Limpando state locks e helm releases pendentes..."
+  cd "$SCRIPT_DIR/helms"
+
+  # Force-unlock any stuck state lock
+  local lock_id
+  lock_id=$(K3S_OCI_KUBECONFIG="$KUBECONFIG_PATH" terragrunt plan 2>&1 | grep -oP 'ID:\s+\K[a-f0-9-]+' | head -1) || true
+  if [ -n "${lock_id:-}" ]; then
+    echo "  Removendo state lock $lock_id..."
+    terragrunt force-unlock -force "$lock_id" 2>/dev/null || true
+  fi
+
+  # Clean up pending-install/pending-upgrade helm releases
+  for ns in metallb-system cert-manager longhorn-system argocd; do
+    kubectl --kubeconfig "$KUBECONFIG_PATH" -n "$ns" get secret -l owner=helm -o jsonpath='{range .items[?(@.metadata.labels.status!="deployed")]}{.metadata.name}{"\n"}{end}' 2>/dev/null | while read -r secret; do
+      if [ -n "$secret" ]; then
+        echo "  Removendo helm secret pendente: $ns/$secret"
+        kubectl --kubeconfig "$KUBECONFIG_PATH" -n "$ns" delete secret "$secret" 2>/dev/null || true
+      fi
+    done
+  done
+}
+
 deploy_helms() {
   echo "==> Deploy helm releases (cert-manager, longhorn, argocd)..."
+  cleanup_helms_state
   cd "$SCRIPT_DIR/helms"
   K3S_OCI_KUBECONFIG="$KUBECONFIG_PATH" terragrunt apply --auto-approve
 }
@@ -104,6 +128,12 @@ destroy() {
 
   echo "==> Destruindo helm releases..."
   cd "$SCRIPT_DIR/helms"
+  # Force-unlock before destroy too
+  local lock_id
+  lock_id=$(K3S_OCI_KUBECONFIG="$KUBECONFIG_PATH" terragrunt plan 2>&1 | grep -oP 'ID:\s+\K[a-f0-9-]+' | head -1) || true
+  if [ -n "${lock_id:-}" ]; then
+    terragrunt force-unlock -force "$lock_id" 2>/dev/null || true
+  fi
   K3S_OCI_KUBECONFIG="$KUBECONFIG_PATH" terragrunt destroy --auto-approve || true
 
   echo "==> Destruindo DNS..."
