@@ -5,8 +5,10 @@ service:
   type: LoadBalancer
 
 ports:
-  web: {}
-  websecure: {}
+  web:
+    hostPort: 80
+  websecure:
+    hostPort: 443
 
 providers:
   kubernetesCRD:
