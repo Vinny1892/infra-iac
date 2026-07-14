@@ -232,6 +232,49 @@ module "vpc" { source = "../../../atoms/aws/network/vpc" ... }
 - O templatefile no generate block usa `$${path.module}` (dois `$` para escapar o Terragrunt) que vira `${path.module}` no `.tf` gerado
 - GitHub App: Terraform gera a chave privada via `github_app_private_key` e injeta no K8s secret do ArgoCD com `argocd.argoproj.io/secret-type=repository`
 
+### OCI K3s Cluster Lifecycle
+
+**IMPORTANTE: Sempre usar os scripts deploy.sh e destroy.sh - nunca usar kubectl manual para resolver problemas**
+
+```bash
+# Deploy completo OCI K3s (cria VM, instala K3s, configura Helm, ArgoCD, DNS)
+cd oci/tenancy/regulus/us_ashburn_1/applications/k3s
+bash deploy.sh deploy
+
+# Destroy completo OCI K3s (limpa tudo, incluindo recursos K8s)
+bash deploy.sh destroy
+
+# Deploy apenas helm releases (se VM já existe)
+bash deploy.sh helms-only
+
+# Verificar status do cluster
+bash deploy.sh verify
+```
+
+O script `deploy.sh`:
+1. Cria a VM OCI via Terraform (com user_data que instala K3s automaticamente)
+2. Aguarda K3s ficar Ready (verifica com kubectl na VM)
+3. Busca kubeconfig e salva em `~/.kube/k3s-oci.yaml`
+4. Deploy Helm releases (MetalLB, cert-manager, longhorn, ArgoCD)
+5. Configura MetalLB IPAddressPool + L2Advertisement (aguarda webhook ficar pronto)
+6. Aplica ArgoCD root app-of-apps
+7. Verifica o cluster
+
+O script lida automaticamente com:
+- State locks presos (force-unlock antes de apply/destroy)
+- Helm releases em estado pendente (limpa secrets pendentes)
+
+O script `pre-destroy.sh` é chamado automaticamente pelo `destroy` e limpa:
+- ArgoCD applications
+- PVCs
+- Desinstala K3s da VM (IP obtido dinamicamente via `terragrunt output`)
+
+**MetalLB** é configurado via `null_resource` + `kubectl apply` (evita erro de CRD no plan-time). O IP da VM é obtido dinamicamente.
+
+**DNS** é gerenciado inteiramente pelo **external-dns** rodando no K3s. Ele observa Ingress resources e cria registros A no Cloudflare automaticamente via API token (secret `cloudflare-api-token` no namespace `external-dns`).
+
+**Traefik** usa DaemonSet com `hostPort: 80/443` + service `LoadBalancer` (MetalLB publica o IP no Ingress status para o external-dns). Não usa redirect HTTP→HTTPS (incompatível com Cloudflare proxy Flexible SSL).
+
 ### Terraform Version
 
 Requires Terraform >= v1.9.2. Primary AWS provider: `~> 5.0`. OCI provider: `~> 6.0`.
