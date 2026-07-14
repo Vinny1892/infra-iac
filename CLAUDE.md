@@ -174,6 +174,7 @@ eval $(op signin)
 **1Password items in vault `Lab-IAC`:**
 - `Cloudflare API Token` — field `credential` (used by cert-manager and external-dns K8s secrets)
 - `GitHub App` — fields `owner`, `app_id`, `installation_id`, `repo_name`, `private_key` (used by ArgoCD repo auth)
+- `GitHub OAuth ArgoCD` — fields `client_id`, `client_secret` (used by ArgoCD Dex GitHub login)
 
 The `deploy.sh` script validates `op` CLI auth before running (preflight check).
 
@@ -278,6 +279,24 @@ O script `pre-destroy.sh` é chamado automaticamente pelo `destroy` e limpa:
 **DNS** é gerenciado inteiramente pelo **external-dns** rodando no K3s. Ele observa Ingress resources e cria registros A no Cloudflare automaticamente via API token (secret `cloudflare-api-token` no namespace `external-dns`).
 
 **Traefik** usa DaemonSet com `hostPort: 80/443` + service `LoadBalancer` (MetalLB publica o IP no Ingress status para o external-dns). Não usa redirect HTTP→HTTPS (incompatível com Cloudflare proxy Flexible SSL).
+
+### ArgoCD — Arquitetura e Self-Management
+
+O ArgoCD é **self-managed** via App of Apps (`selfHeal: true`, `ServerSideApply=true`):
+
+- **Seed install** (Terraform): instala ArgoCD via Helm com `configs.secret.extra` contendo credenciais OAuth do Dex (vindas do 1Password). Também cria o repo secret com GitHub App auth.
+- **Self-management** (ArgoCD Application `argocd`): puxa values de `argocd/values/argocd.yaml` no branch `master`. Qualquer mudança de config deve ser feita nesse arquivo via commit+push — patches manuais são revertidos pelo self-heal.
+- **Config Application** (`argocd-config`): gerencia manifests em `argocd/manifests/argocd/` (Ingress, Certificate).
+
+**Login via GitHub OAuth (Dex):**
+- Connector GitHub configurado em `argocd/values/argocd.yaml` com `$dex.github.clientID` / `$dex.github.clientSecret` (referências ao `argocd-secret`)
+- Os valores reais são injetados pelo Terraform seed via `configs.secret.extra` (lidos do 1Password)
+- Filtro por org `nonpeer` — apenas membros da org GitHub `nonpeer` podem fazer login
+- RBAC: `Vinny1892` = `role:admin`, default = `role:readonly`
+
+**Importante — não confundir URL do ArgoCD:**
+- `configs.cm.url` (no `argocd-cm` ConfigMap) — URL usada pelo Dex como issuer. Sem ela, Dex falha com "unsupported protocol scheme"
+- `configs.params.server.url` (no `argocd-cmd-params-cm`) — URL do server. Ambas devem ser `https://argocd-k3s.vinny.dev.br`
 
 ### Terraform Version
 
