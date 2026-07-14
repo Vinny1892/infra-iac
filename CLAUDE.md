@@ -280,6 +280,44 @@ O script `pre-destroy.sh` é chamado automaticamente pelo `destroy` e limpa:
 
 **Traefik** usa DaemonSet com `hostPort: 80/443` + service `LoadBalancer` (MetalLB publica o IP no Ingress status para o external-dns). Não usa redirect HTTP→HTTPS (incompatível com Cloudflare proxy Flexible SSL).
 
+### Deploy Script — Metodologia de Correção
+
+**Regra fundamental: se algo quebra, a correção vai no script. Nunca corrigir manualmente e seguir em frente.** O ciclo é: quebrou → diagnostica → corrige no script → `deploy.sh destroy` → `deploy.sh deploy` do zero → só para quando o script funcionar de ponta a ponta sem intervenção. Sempre validar rodando o destroy seguido do deploy completo — não basta testar só o passo que quebrou, porque o script precisa funcionar end-to-end em qualquer estado.
+
+**Erros encontrados e corrigidos no deploy.sh:**
+
+1. **stdout poluído no `wait_for_k3s`** — Echos de progresso eram capturados em `VM_IP=$(wait_for_k3s)` junto com o IP, causando falha no SSH. Fix: redirecionar todas as mensagens de progresso para `>&2`, deixando apenas o IP no stdout.
+
+2. **SSH falha intermitente no `fetch_kubeconfig`** — VM ainda inicializando, SSH recusava conexão. Fix: loop de retry com `ConnectTimeout=10` e até 20 tentativas com sleep de 15s.
+
+3. **State locks presos no DynamoDB** — Runs anteriores falhavam e deixavam locks. Fix: `cleanup_helms_state()` tenta `terragrunt plan`, captura o lock ID via grep, e faz `force-unlock` antes de prosseguir.
+
+4. **Helm releases em estado `pending-install`/`pending-upgrade`** — Helm falhou no meio e deixou secrets pendentes que bloqueiam re-runs. Fix: `cleanup_helms_state()` lista secrets com `owner=helm` e status != `deployed` em todos os namespaces relevantes e deleta.
+
+5. **MetalLB CRDs não existem no plan-time** — `kubernetes_manifest` valida CRDs durante `terraform plan`, mas MetalLB ainda não foi instalado. Fix: substituir `kubernetes_manifest` por `null_resource` + `kubectl apply` com heredoc inline.
+
+6. **MetalLB webhook não pronto** — `kubectl apply` do IPAddressPool falhava porque o webhook do MetalLB ainda não tinha endpoints. Fix: loop que espera `metallb-webhook-service` ter endpoints antes de aplicar os CRDs (até 60 tentativas x 5s).
+
+7. **Helm `wait=true` causava timeout** — cert-manager e outros helms travavam esperando pods ficarem ready (http2 connection lost). Fix: setar `wait = false` e `wait_for_jobs = false` em todos os helm_releases — o ArgoCD cuida da reconciliação.
+
+8. **HTTP→HTTPS redirect loop** — Traefik redirecionava HTTP→HTTPS, mas Cloudflare Flexible SSL envia HTTP pro origin, criando loop infinito. Fix: remover redirect do Traefik. Cloudflare proxy já serve HTTPS pro cliente.
+
+9. **MetalLB L2 incompatível com IPs públicos de cloud** — Remover `hostPort` em favor de MetalLB puro quebrou o tráfego. MetalLB L2 usa ARP que só funciona em rede local, não com IPs públicos da OCI. Fix: manter `hostPort: 80/443` para tráfego real + `service.type: LoadBalancer` para que MetalLB publique o IP no Ingress status (necessário para external-dns).
+
+10. **Variável de ambiente com nome errado** — `GITHUB_APP_INSTALLATION` não existia, o correto era `GITHUB_APP_INSTALL_ID`. Fix: corrigir no terragrunt.hcl.
+
+11. **Variável `kubeconfig_path` duplicada** — Declarada em `variables.tf` e também gerada pelo Terragrunt no `k3s_provider.tf`. Fix: remover de `variables.tf`, manter apenas no generate block.
+
+12. **`pre-destroy.sh` com IP hardcoded** — IP antigo da VM ficou hardcoded no script. Fix: obter IP dinamicamente via `terragrunt output -raw instance_public_ip` com fallback se VM não existir.
+
+**Metodologia de diagnóstico:**
+- Sempre começar pelos logs: `kubectl logs deploy/<componente>` para erros de aplicação
+- Para Terraform/Terragrunt: ler o stderr completo, não só as últimas linhas — o erro real costuma estar no meio
+- Para Helm: `kubectl get secret -l owner=helm -n <ns>` para verificar estado dos releases
+- Para DNS: `kubectl get ingress -A` (verificar se IP está no status) → `kubectl logs deploy/external-dns -n external-dns` → `nslookup <domain>`
+- Para tráfego: verificar a cadeia completa: Cliente → Cloudflare proxy → hostPort (80/443) → Traefik → Service → Pod
+- **Nunca assumir** que algo funciona porque "deveria funcionar" — verificar cada camada
+
 ### ArgoCD — Arquitetura e Self-Management
 
 O ArgoCD é **self-managed** via App of Apps (`selfHeal: true`, `ServerSideApply=true`):
