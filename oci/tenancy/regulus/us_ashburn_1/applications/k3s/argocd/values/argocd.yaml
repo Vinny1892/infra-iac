@@ -16,8 +16,6 @@ configs:
         config:
           clientID: $dex.github.clientID
           clientSecret: $dex.github.clientSecret
-          orgs:
-          - name: Vinny1892
   rbac:
     policy.default: role:readonly
     policy.csv: |
