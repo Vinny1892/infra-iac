@@ -4,7 +4,6 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 OCI_UNIT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"  # us_ashburn_1/
 
-DNS_NAME="k3s.vinny.dev.br"
 SSH_KEY="${SSH_KEY:-$HOME/.ssh/id_ed25519}"
 SSH_PORT="22"
 SSH_USER="ubuntu"
@@ -66,12 +65,6 @@ fetch_kubeconfig() {
   sed "s/127.0.0.1/$vm_ip/g" /tmp/k3s-oci-raw.yaml > "$KUBECONFIG_PATH"
   chmod 600 "$KUBECONFIG_PATH"
   echo "Kubeconfig salvo em $KUBECONFIG_PATH"
-}
-
-deploy_dns() {
-  echo "==> Aplicando DNS Cloudflare..."
-  cd "$SCRIPT_DIR/dns"
-  terragrunt apply --auto-approve
 }
 
 # Clean up stuck Terraform state locks and pending Helm releases
@@ -136,10 +129,6 @@ destroy() {
   fi
   K3S_OCI_KUBECONFIG="$KUBECONFIG_PATH" terragrunt destroy --auto-approve || true
 
-  echo "==> Destruindo DNS..."
-  cd "$SCRIPT_DIR/dns"
-  terragrunt destroy --auto-approve || true
-
   echo "==> Destruindo VM..."
   cd "$OCI_UNIT_DIR/applications/compute/vm"
   terragrunt destroy --auto-approve || true
@@ -152,7 +141,6 @@ case "$MODE" in
     provision_vm
     VM_IP=$(wait_for_k3s)
     fetch_kubeconfig "$VM_IP"
-    deploy_dns
     deploy_helms
     deploy_root_app
     verify
