@@ -294,9 +294,22 @@ O ArgoCD é **self-managed** via App of Apps (`selfHeal: true`, `ServerSideApply
 - Filtro por org `nonpeer` — apenas membros da org GitHub `nonpeer` podem fazer login
 - RBAC: `Vinny1892` = `role:admin`, default = `role:readonly`
 
-**Importante — não confundir URL do ArgoCD:**
-- `configs.cm.url` (no `argocd-cm` ConfigMap) — URL usada pelo Dex como issuer. Sem ela, Dex falha com "unsupported protocol scheme"
-- `configs.params.server.url` (no `argocd-cmd-params-cm`) — URL do server. Ambas devem ser `https://argocd-k3s.vinny.dev.br`
+**Troubleshooting — erros encontrados e como diagnosticar:**
+
+1. **`unsupported protocol scheme ""`** — Dex não conseguiu montar a issuer URL. Causa: `configs.cm.url` no ConfigMap `argocd-cm` estava com valor default (`https://argocd.example.com` ou vazio). Diagnóstico: `kubectl get configmap argocd-cm -n argocd -o jsonpath='{.data.url}'`. Fix: setar `configs.cm.url` (não confundir com `configs.params.server.url` que fica em outro ConfigMap).
+
+2. **`user not in required orgs or teams`** — Dex filtrava por org GitHub mas o nome informado era um user, não uma org. Diagnóstico: `kubectl logs deploy/argocd-dex-server -n argocd`. Fix: corrigir o nome da org no `dex.config` (usar org real, ex: `nonpeer`).
+
+3. **ConfigMap não atualiza após `terragrunt apply`** — O ArgoCD Application `argocd` tem `selfHeal: true` e sobrescrevia o ConfigMap com os values do git. Diagnóstico: `kubectl get application argocd -n argocd -o yaml` revelou que puxa values de `argocd/values/argocd.yaml`. Fix: alterar o arquivo no git e fazer commit+push em vez de aplicar via Terraform.
+
+4. **Terraform apply sem efeito no ArgoCD** — Configs feitas via `helm_release` no Terraform seed são sobrescritas pelo self-heal do ArgoCD. Regra: config não-sensível vai no git (`argocd/values/argocd.yaml`), secrets vão no Terraform seed via `configs.secret.extra` (preservadas pelo SSA pois ArgoCD não gerencia esses campos).
+
+**Regras para alterações no ArgoCD:**
+- **NUNCA** alterar config do ArgoCD via `kubectl patch/edit` ou `terragrunt apply` direto — o self-heal reverte
+- **Config não-sensível** (URL, Dex connector com `$` refs, RBAC): alterar em `argocd/values/argocd.yaml`, commit+push, forçar sync se necessário (`kubectl annotate application argocd -n argocd argocd.argoproj.io/refresh=hard --overwrite`)
+- **Secrets** (OAuth credentials, tokens): manter no Terraform seed via `configs.secret.extra` — o SSA preserva campos não gerenciados pelo chart
+- **Forçar sync**: anotar a Application com `argocd.argoproj.io/refresh=hard`, nunca deletar/recriar recursos
+- **Diagnosticar login**: sempre começar por `kubectl logs deploy/argocd-dex-server -n argocd`
 
 ### Terraform Version
 
