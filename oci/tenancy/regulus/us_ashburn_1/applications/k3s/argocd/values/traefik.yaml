@@ -2,19 +2,11 @@ deployment:
   kind: DaemonSet
 
 service:
-  type: ClusterIP
+  type: LoadBalancer
 
 ports:
-  web:
-    hostPort: 80
-    http:
-      redirections:
-        entryPoint:
-          to: websecure
-          scheme: https
-          permanent: true
-  websecure:
-    hostPort: 443
+  web: {}
+  websecure: {}
 
 providers:
   kubernetesCRD:

@@ -2,6 +2,15 @@ include "root" {
   path = find_in_parent_folders("root.hcl")
 }
 
+dependency "vm" {
+  config_path = "../../compute/vm"
+
+  mock_outputs = {
+    instance_public_ip = "1.2.3.4"
+  }
+  mock_outputs_allowed_terraform_commands = ["validate", "plan"]
+}
+
 terraform {
   source = "../../../../../../../organisms/oci/k3s/helms"
 }
@@ -36,4 +45,5 @@ inputs = {
   github_app_installation_id = get_env("GITHUB_APP_INSTALL_ID", "")
   github_repo_name           = get_env("GITHUB_REPO_NAME", "infra-iac")
   github_app_private_key     = get_env("GITHUB_APP_PRIVATE_KEY", "")
+  vm_public_ip               = dependency.vm.outputs.instance_public_ip
 }

@@ -27,18 +27,18 @@ wait_for_k3s() {
   vm_ip=$(cd "$OCI_UNIT_DIR/applications/compute/vm" && get_vm_ip)
   local SSH="ssh -i $SSH_KEY -p $SSH_PORT -o StrictHostKeyChecking=no $SSH_USER@$vm_ip"
 
-  echo "==> VM IP: $vm_ip — aguardando K3s ficar Ready (cloud-init)..."
+  echo "==> VM IP: $vm_ip — aguardando K3s ficar Ready (cloud-init)..." >&2
   local retries=60
   for i in $(seq 1 $retries); do
     if $SSH "kubectl get nodes 2>/dev/null | grep -q ' Ready'" 2>/dev/null; then
-      echo "K3s pronto."
+      echo "K3s pronto." >&2
       echo "$vm_ip"
       return 0
     fi
-    echo "  Tentativa $i/$retries — aguardando 15s..."
+    echo "  Tentativa $i/$retries — aguardando 15s..." >&2
     sleep 15
   done
-  echo "ERROR: K3s nao ficou Ready."
+  echo "ERROR: K3s nao ficou Ready." >&2
   exit 1
 }
 
@@ -46,8 +46,24 @@ fetch_kubeconfig() {
   local vm_ip="$1"
   echo "==> Buscando kubeconfig da VM..."
   mkdir -p "$(dirname "$KUBECONFIG_PATH")"
-  scp -i "$SSH_KEY" -P "$SSH_PORT" -o StrictHostKeyChecking=no \
-    "$SSH_USER@$vm_ip:/etc/rancher/k3s/k3s.yaml" /tmp/k3s-oci-raw.yaml
+
+  # Wait for SSH to be ready with retries
+  local retries=20
+  local success=false
+  for i in $(seq 1 $retries); do
+    if ssh -i "$SSH_KEY" -p "$SSH_PORT" -o StrictHostKeyChecking=no -o ConnectTimeout=10 "$SSH_USER@$vm_ip" "cat /etc/rancher/k3s/k3s.yaml" > /tmp/k3s-oci-raw.yaml 2>/dev/null; then
+      success=true
+      break
+    fi
+    echo "  Tentativa $i/$retries - aguardando SSH e K3s ficarem disponíveis..."
+    sleep 15
+  done
+
+  if [ "$success" = false ]; then
+    echo "ERROR: Não foi possível conectar via SSH após $retries tentativas"
+    exit 1
+  fi
+
   sed "s/127.0.0.1/$vm_ip/g" /tmp/k3s-oci-raw.yaml > "$KUBECONFIG_PATH"
   chmod 600 "$KUBECONFIG_PATH"
   echo "Kubeconfig salvo em $KUBECONFIG_PATH"

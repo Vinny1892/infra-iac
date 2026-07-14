@@ -1,4 +1,76 @@
 # =============================================================================
+# MetalLB - Load Balancer para K3s
+# =============================================================================
+
+resource "helm_release" "metallb" {
+  name       = "metallb"
+  repository = "https://metallb.github.io/metallb"
+  chart      = "metallb"
+  version    = "0.14.8"
+  namespace  = "metallb-system"
+  create_namespace = true
+  timeout    = 600
+  wait       = false
+  wait_for_jobs = false
+
+  values = [
+    yamlencode({
+      speaker = {
+        tolerations = [
+          {
+            key      = "node-role.kubernetes.io/control-plane"
+            operator = "Exists"
+            effect   = "NoSchedule"
+          }
+        ]
+      }
+    })
+  ]
+}
+
+resource "null_resource" "metallb_config" {
+  depends_on = [helm_release.metallb]
+
+  triggers = {
+    vm_ip          = var.vm_public_ip
+    kubeconfig     = var.kubeconfig_path
+  }
+
+  provisioner "local-exec" {
+    command = <<-SCRIPT
+      # Wait for MetalLB CRDs to be registered
+      for i in $(seq 1 30); do
+        if kubectl --kubeconfig "${var.kubeconfig_path}" get crd ipaddresspools.metallb.io >/dev/null 2>&1; then
+          break
+        fi
+        echo "Waiting for MetalLB CRDs... ($i/30)"
+        sleep 5
+      done
+
+      kubectl --kubeconfig "${var.kubeconfig_path}" apply -f - <<'EOF'
+apiVersion: metallb.io/v1beta1
+kind: IPAddressPool
+metadata:
+  name: default-pool
+  namespace: metallb-system
+spec:
+  addresses:
+    - "${var.vm_public_ip}-${var.vm_public_ip}"
+---
+apiVersion: metallb.io/v1beta1
+kind: L2Advertisement
+metadata:
+  name: l2-advert
+  namespace: metallb-system
+spec:
+  ipAddressPools:
+    - default-pool
+EOF
+    SCRIPT
+  }
+}
+
+# =============================================================================
 # Bootstrap: Namespaces + Secrets (created before ArgoCD exists)
 # =============================================================================
 
@@ -54,7 +126,7 @@ resource "helm_release" "cert_manager" {
   version    = "v1.19.4"
   namespace  = "cert-manager"
   timeout    = 300
-  wait       = true
+  wait       = false
 
   values = [
     yamlencode({
@@ -82,7 +154,7 @@ resource "helm_release" "longhorn" {
   namespace        = "longhorn-system"
   create_namespace = true
   timeout          = 600
-  wait             = true
+  wait             = false
 
   values = [
     yamlencode({

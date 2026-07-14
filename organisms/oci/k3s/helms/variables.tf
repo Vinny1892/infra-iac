@@ -4,6 +4,11 @@ variable "cloudflare_api_token" {
   default   = ""
 }
 
+variable "vm_public_ip" {
+  type        = string
+  description = "IP público da VM OCI para configurar o MetalLB"
+}
+
 variable "github_owner" {
   type = string
 }

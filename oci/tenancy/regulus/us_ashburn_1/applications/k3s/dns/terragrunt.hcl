@@ -36,6 +36,19 @@ generate "main" {
 variable "zone_id"  { type = string }
 variable "vm_ip"    { type = string }
 
+# Wildcard DNS — all *.vinny.dev.br subdomains resolve to the K3s VM IP.
+# Traefik on K3s handles routing by Host header.
+# external-dns can create specific records that override this wildcard.
+resource "cloudflare_record" "k3s_wildcard" {
+  zone_id         = var.zone_id
+  name            = "*"
+  content         = var.vm_ip
+  type            = "A"
+  ttl             = 120
+  proxied         = false
+  allow_overwrite = true
+}
+
 output "k3s_ip" {
   value = var.vm_ip
 }
