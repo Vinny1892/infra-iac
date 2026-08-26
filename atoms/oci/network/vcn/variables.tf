@@ -87,3 +87,9 @@ variable "additional_egress_rules" {
   }))
   default = []
 }
+
+variable "dns_label" {
+  description = "Rótulo DNS da VCN. Precisa ser único: forma o domínio <dns_label>.oraclevcn.com"
+  type        = string
+  default     = "mainvcn"
+}

@@ -51,8 +51,9 @@ resource "oci_core_instance" "instance" {
   }
 
   source_details {
-    source_type = "image"
-    source_id   = var.image_id
+    source_type             = "image"
+    source_id               = var.image_id
+    boot_volume_size_in_gbs = var.boot_volume_size_in_gbs
   }
 
   create_vnic_details {
