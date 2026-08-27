@@ -90,3 +90,9 @@ variable "marketplace_listing_version" {
   default     = ""
 }
 
+
+variable "boot_volume_size_in_gbs" {
+  description = "Tamanho do boot volume em GB. Null usa o tamanho da imagem (47 GB no Ubuntu aarch64). Mínimo 47, franquia Always Free é 200 GB somando todos os volumes."
+  type        = number
+  default     = null
+}

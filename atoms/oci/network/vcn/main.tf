@@ -2,7 +2,7 @@ resource "oci_core_vcn" "main" {
   compartment_id = var.compartment_id
   cidr_blocks    = [var.vcn_cidr_block]
   display_name   = var.vcn_name
-  dns_label      = "mainvcn"
+  dns_label      = var.dns_label
 }
 
 resource "oci_core_internet_gateway" "igw" {
