@@ -9,6 +9,11 @@ variable "vm_public_ip" {
   description = "IP público da VM OCI para configurar o MetalLB"
 }
 
+variable "vm_instance_id" {
+  type        = string
+  description = "OCID da instância. Usado como trigger do metallb_config: identifica o cluster e muda a cada recriação da VM, o que vm_public_ip deixou de fazer quando o IP passou a ser reservado."
+}
+
 variable "github_owner" {
   type = string
 }

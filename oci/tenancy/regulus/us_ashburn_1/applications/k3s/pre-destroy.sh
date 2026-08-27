@@ -22,12 +22,10 @@ sleep 30
 echo "==> Deleting PVCs across all namespaces..."
 $KUBECTL delete pvc --all-namespaces --all --timeout=120s 2>/dev/null || echo "No PVCs found."
 
-if [ -n "${VM_IP:-}" ]; then
-  echo "==> Uninstalling K3s on VM ($VM_IP)..."
-  ssh -i "$SSH_KEY" -p "$SSH_PORT" -o StrictHostKeyChecking=no "$SSH_USER@$VM_IP" \
-    "sudo /usr/local/bin/k3s-uninstall.sh" 2>/dev/null || echo "K3s not installed or already removed."
-else
-  echo "==> Skipping K3s uninstall (VM IP not available)."
-fi
+# O uninstall do K3s NAO acontece aqui. Ele derruba o API server, e o
+# `terragrunt destroy` dos helm releases — que roda depois deste script — precisa
+# do cluster vivo para remover os releases. Com o uninstall aqui, aquele destroy
+# falhava sempre com "cluster unreachable" e deixava os recursos orfaos no state.
+# O uninstall foi movido para deploy.sh, apos o destroy dos helms.
 
 echo "==> Pre-destroy cleanup complete."

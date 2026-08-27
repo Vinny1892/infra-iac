@@ -67,9 +67,21 @@ variable "ssh_port" {
 }
 
 variable "assign_public_ip" {
-  description = "Define se a VNIC primária recebe IP público"
+  description = "Define se a VNIC primária recebe IP público efêmero. Ignorado quando reserved_public_ip_id está definido."
   type        = bool
   default     = true
+}
+
+variable "reserved_public_ip_id" {
+  description = "OCID de um IP público reservado a ser anexado à VNIC primária. Quando definido, a VNIC não recebe IP efêmero."
+  type        = string
+  default     = ""
+}
+
+variable "reserved_public_ip_address" {
+  description = "Endereço IPv4 do IP reservado. Usado no output instance_public_ip quando reserved_public_ip_id está definido."
+  type        = string
+  default     = ""
 }
 
 variable "user_data_base64" {
@@ -89,7 +101,6 @@ variable "marketplace_listing_version" {
   type        = string
   default     = ""
 }
-
 
 variable "boot_volume_size_in_gbs" {
   description = "Tamanho do boot volume em GB. Null usa o tamanho da imagem (47 GB no Ubuntu aarch64). Mínimo 47, franquia Always Free é 200 GB somando todos os volumes."

@@ -25,6 +25,10 @@ provision_vm() {
   echo "==> Provisionando VM (user_data instala K3s automaticamente)..."
   cd "$OCI_UNIT_DIR/network/vcn"
   terragrunt apply --auto-approve
+  # IP reservado precisa existir antes da VM: seu endereco entra no user_data
+  # (--tls-san) e e anexado a VNIC apos a criacao da instancia.
+  cd "$OCI_UNIT_DIR/network/reserved_ip"
+  terragrunt apply --auto-approve
   cd "$OCI_UNIT_DIR/applications/compute/vm"
   terragrunt apply --auto-approve
 }
@@ -107,6 +111,13 @@ deploy_helms() {
 }
 
 deploy_root_app() {
+  # O root app precisa do repo-server de pe para gerar manifests. Aplicado antes
+  # disso, o ArgoCD grava um ComparisonError ("connection refused" na 8081) e a
+  # Application fica em Unknown ate alguem forcar um refresh na mao.
+  echo "==> Aguardando ArgoCD ficar pronto..."
+  kubectl --kubeconfig "$KUBECONFIG_PATH" -n argocd wait --for=condition=Available \
+    deploy/argocd-repo-server deploy/argocd-server --timeout=300s || true
+
   echo "==> Aplicando ArgoCD root app-of-apps..."
   kubectl --kubeconfig "$KUBECONFIG_PATH" apply -f "$SCRIPT_DIR/argocd/root-app.yaml"
 }
@@ -136,6 +147,19 @@ destroy() {
     terragrunt force-unlock -force "$lock_id" 2>/dev/null || true
   fi
   K3S_OCI_KUBECONFIG="$KUBECONFIG_PATH" terragrunt destroy --auto-approve || true
+
+  # Uninstall do K3s so agora: antes do destroy acima o cluster precisa estar
+  # vivo, senao os helm releases ficam orfaos no state.
+  local vm_ip
+  vm_ip=$(cd "$OCI_UNIT_DIR/applications/compute/vm" && get_vm_ip) || true
+  if [ -n "${vm_ip:-}" ]; then
+    echo "==> Desinstalando K3s na VM ($vm_ip)..."
+    ssh -i "$SSH_KEY" -p "$SSH_PORT" -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
+      "$SSH_USER@$vm_ip" "sudo /usr/local/bin/k3s-uninstall.sh" 2>/dev/null \
+      || echo "K3s nao instalado ou ja removido."
+  else
+    echo "==> Pulando uninstall do K3s (IP da VM indisponivel)."
+  fi
 
   echo "==> Destruindo VM..."
   cd "$OCI_UNIT_DIR/applications/compute/vm"
