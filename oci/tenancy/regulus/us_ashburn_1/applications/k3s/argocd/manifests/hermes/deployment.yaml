@@ -43,10 +43,29 @@ spec:
             - name: HERMES_GID
               value: "10000"
             # Sobe o dashboard como servico supervisionado pelo s6 no mesmo
-            # container. Ele guarda as API keys — a exposicao publica so e
-            # aceitavel porque o Cloudflare Access autentica antes do Traefik.
+            # container.
             - name: HERMES_DASHBOARD
               value: "1"
+            # O Hermes se recusa a expor o dashboard em 0.0.0.0 sem um auth
+            # provider registrado ("There is no unauthenticated public-dashboard
+            # option") e nao aceita proxy autenticado na frente como
+            # substituto — sem isto o processo nem sobe e o pod fica 0/1.
+            # O Cloudflare Access segue como primeira camada; esta e a segunda,
+            # exigida pela propria aplicacao.
+            #
+            # O Secret hermes-dashboard-auth NAO esta neste repositorio: e
+            # criado fora do GitOps e precisa ser recriado a mao apos um
+            # destroy. Guarda o hash scrypt, nunca a senha em texto puro.
+            - name: HERMES_DASHBOARD_BASIC_AUTH_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: hermes-dashboard-auth
+                  key: username
+            - name: HERMES_DASHBOARD_BASIC_AUTH_PASSWORD_HASH
+              valueFrom:
+                secretKeyRef:
+                  name: hermes-dashboard-auth
+                  key: password_hash
           ports:
             - name: gateway
               containerPort: 8642
