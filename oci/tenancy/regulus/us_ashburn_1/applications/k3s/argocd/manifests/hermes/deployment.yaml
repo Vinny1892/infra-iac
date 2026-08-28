@@ -78,6 +78,13 @@ spec:
             # containers que o agente criar.
             - name: TERMINAL_DOCKER_FORWARD_ENV
               value: "[]"
+            # Os defaults do Hermes (5 GiB RAM / 50 GiB com quota overlay)
+            # nao cabem neste DinD. A cota 0 deixa o limite do sidecar (2 GiB)
+            # ser a fronteira efetiva e evita exigir XFS com project quotas.
+            - name: TERMINAL_CONTAINER_MEMORY
+              value: "1024"
+            - name: TERMINAL_CONTAINER_DISK
+              value: "0"
             # O daemon e efemero por design; nao manter filesystem de comandos
             # entre reinicios evita acumular estado executavel fora do PVC.
             - name: TERMINAL_CONTAINER_PERSISTENT
