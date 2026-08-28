@@ -66,6 +66,31 @@ spec:
                 secretKeyRef:
                   name: hermes-dashboard-auth
                   key: password_hash
+            # Cada comando do agente roda em um container separado no daemon
+            # Docker do sidecar abaixo. O Hermes em si continua sem privilege.
+            - name: TERMINAL_ENV
+              value: docker
+            - name: DOCKER_HOST
+              value: tcp://127.0.0.1:2375
+            - name: TERMINAL_DOCKER_IMAGE
+              value: nikolaik/python-nodejs:python3.11-nodejs20
+            # Nao encaminhar tokens do pod nem credenciais do Hermes para os
+            # containers que o agente criar.
+            - name: TERMINAL_DOCKER_FORWARD_ENV
+              value: "[]"
+            # O daemon e efemero por design; nao manter filesystem de comandos
+            # entre reinicios evita acumular estado executavel fora do PVC.
+            - name: TERMINAL_CONTAINER_PERSISTENT
+              value: "false"
+            - name: TELEGRAM_BOT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: hermes-telegram-bot
+                  key: token
+            # Allowlist estrita: qualquer outro ID recebe deny antes de o
+            # agente processar a mensagem, inclusive em grupos e foruns.
+            - name: TELEGRAM_ALLOWED_USERS
+              value: "802586621"
           ports:
             - name: gateway
               containerPort: 8642
@@ -92,7 +117,37 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /opt/data
+        # O DinD e a fronteira de execucao dos comandos do agente. Ele e o
+        # unico container privilegiado: nao recebe PVC, tokens ou kubeconfig.
+        - name: docker
+          image: docker:27-dind
+          securityContext:
+            privileged: true
+            runAsUser: 0
+            runAsGroup: 0
+          env:
+            - name: DOCKER_TLS_CERTDIR
+              value: ""
+          ports:
+            - name: docker
+              containerPort: 2375
+          readinessProbe:
+            tcpSocket:
+              port: docker
+            periodSeconds: 5
+            failureThreshold: 24
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              memory: 2Gi
+          volumeMounts:
+            - name: docker-data
+              mountPath: /var/lib/docker
       volumes:
         - name: data
           persistentVolumeClaim:
             claimName: hermes-data
+        - name: docker-data
+          emptyDir: {}
