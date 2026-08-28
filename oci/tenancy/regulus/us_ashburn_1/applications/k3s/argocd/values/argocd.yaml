@@ -20,5 +20,12 @@ configs:
           - name: nonpeer
   rbac:
     policy.default: role:readonly
+    # Por padrao o ArgoCD casa as regras de RBAC apenas contra o claim `sub`,
+    # que no connector GitHub do Dex e o ID numerico do usuario (41531003), nao
+    # o login. Sem isto, `g, Vinny1892, ...` nunca casa e todo acesso cai no
+    # policy.default (readonly) — o sintoma e "permission denied: applications,
+    # sync, ..., sub: 41531003" mesmo com o login bem-sucedido.
+    # `scopes` adiciona claims a serem examinados alem do `sub`.
+    scopes: '[groups, preferred_username]'
     policy.csv: |
       g, Vinny1892, role:admin
