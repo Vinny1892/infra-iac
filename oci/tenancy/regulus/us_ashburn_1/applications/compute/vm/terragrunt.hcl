@@ -10,21 +10,79 @@ locals {
   region_vars  = read_terragrunt_config(find_in_parent_folders("_locals.hcl"))
   k3s_dns_name = "k3s.vinny.dev.br"
   k3s_version  = "v1.33.1+k3s1"
+}
 
-  user_data = base64encode(<<-EOF
+dependency "vcn" {
+  config_path = "../../../network/vcn"
+
+  mock_outputs = {
+    subnet_public = [{ id = "ocid1.subnet.mock", availability_domain = "jnRJ:US-ASHBURN-AD-1" }]
+  }
+  mock_outputs_allowed_terraform_commands = ["validate", "plan"]
+}
+
+dependency "reserved_ip" {
+  config_path = "../../../network/reserved_ip"
+
+  mock_outputs = {
+    public_ip_id      = "ocid1.publicip.mock"
+    public_ip_address = "203.0.113.10"
+  }
+  # destroy/output/init tambem precisam dos mocks: enquanto a unit reserved_ip
+  # nao tiver state, a falha em resolver estes outputs derruba o parse de TODO
+  # o bloco dependency — inclusive o da vcn — e impede destruir a VM.
+  # Os mocks so entram quando nao ha outputs reais; com a unit aplicada, o valor
+  # verdadeiro prevalece.
+  mock_outputs_allowed_terraform_commands = ["validate", "plan", "init", "output", "destroy"]
+}
+
+terraform {
+  source = "../../../../../../../atoms/oci/compute/instance"
+}
+
+# O user_data fica em inputs (e nao em locals) porque precisa do endereco vindo
+# de dependency.reserved_ip, e locals do Terragrunt sao avaliados antes das
+# dependencies.
+inputs = {
+  compartment_id      = local.region_vars.locals.compartment_id
+  availability_domain = dependency.vcn.outputs.subnet_public[0].availability_domain
+  subnet_id           = dependency.vcn.outputs.subnet_public[0].id
+  instance_name       = "vm-regulus"
+  shape               = "VM.Standard.A1.Flex"
+  ocpus               = 4
+  memory_in_gbs       = 24
+  image_id            = local.region_vars.locals.image_id
+
+  reserved_public_ip_id      = dependency.reserved_ip.outputs.public_ip_id
+  reserved_public_ip_address = dependency.reserved_ip.outputs.public_ip_address
+
+  user_data_base64 = base64encode(<<-EOF
     #!/bin/bash
     exec > >(tee /var/log/k3s-install.log) 2>&1
     set -euo pipefail
 
     K3S_VERSION="${local.k3s_version}"
     DNS_NAME="${local.k3s_dns_name}"
+    PUBLIC_IP="${dependency.reserved_ip.outputs.public_ip_address}"
 
-    echo "==> Obtendo IP publico via IMDS"
-    PUBLIC_IP=$(curl -sf -H "Authorization: Bearer Oracle" \
-      "http://169.254.169.254/opc/v2/vnics/" \
-      | python3 -c "import sys,json; print(json.load(sys.stdin)[0]['publicIp'])" \
-      2>/dev/null || curl -sf https://checkip.amazonaws.com)
-    echo "PUBLIC_IP=$PUBLIC_IP"
+    echo "==> IP publico reservado, injetado pelo Terraform: $PUBLIC_IP"
+
+    # O IP reservado e anexado a VNIC logo apos a criacao da instancia, o que
+    # pode ocorrer depois do cloud-init comecar. Sem esperar a rota de saida,
+    # o primeiro download falha e o set -e derruba o script inteiro.
+    echo "==> Aguardando conectividade de saida"
+    for i in $(seq 1 90); do
+      if curl -sf -m 5 -o /dev/null https://get.k3s.io; then
+        echo "  rede pronta na tentativa $i"
+        break
+      fi
+      echo "  tentativa $i/90 — sem rota de saida ainda, aguardando 5s..."
+      sleep 5
+    done
+    curl -sf -m 10 -o /dev/null https://get.k3s.io || {
+      echo "ERRO: sem conectividade de saida apos 90 tentativas"
+      exit 1
+    }
 
     echo "==> Instalando pre-requisitos Longhorn"
     apt-get update -y
@@ -41,10 +99,15 @@ locals {
     netfilter-persistent save
 
     echo "==> Instalando K3s $K3S_VERSION"
+    # --node-external-ip: a VNIC nao recebe mais IP publico efemero (o endereco
+    # vem do IP reservado, anexado apos a criacao da instancia), entao o k3s nao
+    # descobre sozinho o endereco externo e o node ficaria sem ExternalIP.
+    # O CronJob traefik-patch-external-ip depende desse campo.
     curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION="$K3S_VERSION" sh -s - server \
       --write-kubeconfig-mode 644 \
       --disable=traefik \
       --disable=servicelb \
+      --node-external-ip "$PUBLIC_IP" \
       --tls-san "$PUBLIC_IP" \
       --tls-san "$DNS_NAME"
 
@@ -58,29 +121,4 @@ locals {
     /usr/local/bin/kubectl get nodes
   EOF
   )
-}
-
-dependency "vcn" {
-  config_path = "../../../network/vcn"
-
-  mock_outputs = {
-    subnet_public = [{ id = "ocid1.subnet.mock", availability_domain = "jnRJ:US-ASHBURN-AD-1" }]
-  }
-  mock_outputs_allowed_terraform_commands = ["validate", "plan"]
-}
-
-terraform {
-  source = "../../../../../../../atoms/oci/compute/instance"
-}
-
-inputs = {
-  compartment_id              = local.region_vars.locals.compartment_id
-  availability_domain         = dependency.vcn.outputs.subnet_public[0].availability_domain
-  subnet_id                   = dependency.vcn.outputs.subnet_public[0].id
-  instance_name               = "vm-regulus"
-  shape                       = "VM.Standard.A1.Flex"
-  ocpus                       = 4
-  memory_in_gbs               = 24
-  image_id                    = local.region_vars.locals.image_id
-  user_data_base64            = local.user_data
 }

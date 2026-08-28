@@ -1,0 +1,79 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hermes
+  namespace: hermes
+spec:
+  replicas: 1
+  # Recreate, nao RollingUpdate: o estado e SQLite num volume ReadWriteOnce.
+  # Dois pods simultaneos disputariam o mesmo arquivo e o volume sequer
+  # permitiria o attach duplo — o rollout ficaria travado.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: hermes
+  template:
+    metadata:
+      labels:
+        app: hermes
+    spec:
+      securityContext:
+        # Casa com HERMES_UID/HERMES_GID abaixo. O s6-overlay remapeia o
+        # usuario interno para esses valores e cada servico faz setuidgid para
+        # ele; sem o fsGroup o volume do Longhorn monta como root e o container
+        # nao consegue escrever em /opt/data.
+        runAsUser: 10000
+        runAsGroup: 10000
+        fsGroup: 10000
+      containers:
+        - name: hermes
+          image: nousresearch/hermes-agent:v2026.8.27
+          # ENTRYPOINT nao e sobrescrito de proposito. A imagem usa
+          # ["/init", "/opt/hermes/docker/main-wrapper.sh"], onde /init e o PID 1
+          # do s6-overlay que roda os cont-init.d (chown, reconcile de profile,
+          # toggle do dashboard) e monta a arvore de supervisao. Passar por cima
+          # disso quebra o gateway.
+          args:
+            - gateway
+            - run
+          env:
+            - name: HERMES_UID
+              value: "10000"
+            - name: HERMES_GID
+              value: "10000"
+            # Sobe o dashboard como servico supervisionado pelo s6 no mesmo
+            # container. Ele guarda as API keys — a exposicao publica so e
+            # aceitavel porque o Cloudflare Access autentica antes do Traefik.
+            - name: HERMES_DASHBOARD
+              value: "1"
+          ports:
+            - name: gateway
+              containerPort: 8642
+            - name: dashboard
+              containerPort: 9119
+          # Probes TCP em vez de HTTP: o endpoint de health do gateway fica na
+          # 8642, que so escuta com API_SERVER_ENABLED=true — desligado aqui.
+          # Nao inventei um path de health que eu nao verifiquei.
+          startupProbe:
+            tcpSocket:
+              port: dashboard
+            periodSeconds: 10
+            failureThreshold: 30
+          livenessProbe:
+            tcpSocket:
+              port: dashboard
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              memory: 4Gi
+          volumeMounts:
+            - name: data
+              mountPath: /opt/data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: hermes-data

@@ -3,15 +3,15 @@
 # =============================================================================
 
 resource "helm_release" "metallb" {
-  name       = "metallb"
-  repository = "https://metallb.github.io/metallb"
-  chart      = "metallb"
-  version    = "0.14.8"
-  namespace  = "metallb-system"
+  name             = "metallb"
+  repository       = "https://metallb.github.io/metallb"
+  chart            = "metallb"
+  version          = "0.14.8"
+  namespace        = "metallb-system"
   create_namespace = true
-  timeout    = 600
-  wait       = false
-  wait_for_jobs = false
+  timeout          = 600
+  wait             = false
+  wait_for_jobs    = false
 
   values = [
     yamlencode({
@@ -31,7 +31,12 @@ resource "helm_release" "metallb" {
 resource "null_resource" "metallb_config" {
   depends_on = [helm_release.metallb]
 
+  # instance_id e o unico trigger que muda quando a VM e recriada. O vm_ip virou
+  # constante depois que o IP passou a ser reservado, e o kubeconfig_path sempre
+  # foi fixo — sem instance_id, um destroy que falhe em limpar o state faz o
+  # Terraform pular este recurso e o cluster novo fica sem as CRs do MetalLB.
   triggers = {
+    vm_instance_id = var.vm_instance_id
     vm_ip          = var.vm_public_ip
     kubeconfig     = var.kubeconfig_path
   }
@@ -170,6 +175,13 @@ resource "helm_release" "longhorn" {
     yamlencode({
       defaultSettings = {
         defaultReplicaCount = 1
+        # Sem esta flag o job longhorn-uninstall se recusa a concluir e o
+        # `terragrunt destroy` falha com BackoffLimitExceeded, deixando o
+        # longhorn e o cert-manager (preso por depends_on) orfaos no state.
+        # E uma trava contra apagar storage sem querer: aceitavel aqui porque
+        # este cluster e recriado do zero a cada ciclo e nao guarda dado
+        # persistente. NAO replicar em cluster com dado que importa.
+        deletingConfirmationFlag = true
       }
     })
   ]

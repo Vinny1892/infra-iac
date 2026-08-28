@@ -1,5 +1,6 @@
 locals {
   effective_primary_subnet_id = var.primary_subnet_id != "" ? var.primary_subnet_id : var.subnet_id
+  use_reserved_public_ip      = var.reserved_public_ip_id != ""
   generated_user_data = var.ssh_port != 22 ? base64encode(<<-EOF
     #!/bin/bash
     PORT=${var.ssh_port}
@@ -58,7 +59,7 @@ resource "oci_core_instance" "instance" {
 
   create_vnic_details {
     subnet_id        = local.effective_primary_subnet_id
-    assign_public_ip = var.assign_public_ip
+    assign_public_ip = local.use_reserved_public_ip ? false : var.assign_public_ip
     display_name     = "${var.instance_name}-vnic"
   }
 
@@ -69,6 +70,36 @@ resource "oci_core_instance" "instance" {
 
   freeform_tags = {
     Name = var.instance_name
+  }
+}
+
+# Anexação do IP público reservado à VNIC primária.
+#
+# Não dá para usar o recurso oci_core_public_ip aqui: ele precisaria do
+# private_ip_id (que só existe depois da instância) enquanto a instância precisa
+# do ip_address dele no user_data — ciclo de dependência. O IP é criado numa unit
+# separada (network/reserved_ip) e a associação é feita via CLI.
+data "oci_core_vnic_attachments" "primary" {
+  count          = local.use_reserved_public_ip ? 1 : 0
+  compartment_id = var.compartment_id
+  instance_id    = oci_core_instance.instance.id
+}
+
+data "oci_core_private_ips" "primary" {
+  count   = local.use_reserved_public_ip ? 1 : 0
+  vnic_id = data.oci_core_vnic_attachments.primary[0].vnic_attachments[0].vnic_id
+}
+
+resource "terraform_data" "attach_reserved_public_ip" {
+  count = local.use_reserved_public_ip ? 1 : 0
+
+  triggers_replace = [
+    var.reserved_public_ip_id,
+    data.oci_core_private_ips.primary[0].private_ips[0].id,
+  ]
+
+  provisioner "local-exec" {
+    command = "oci network public-ip update --public-ip-id ${var.reserved_public_ip_id} --private-ip-id ${data.oci_core_private_ips.primary[0].private_ips[0].id} --force"
   }
 }
 

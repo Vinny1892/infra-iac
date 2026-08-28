@@ -4,8 +4,8 @@ output "instance_id" {
 }
 
 output "instance_public_ip" {
-  description = "IP público da instância"
-  value       = oci_core_instance.instance.public_ip
+  description = "IP público da instância (reservado quando reserved_public_ip_id está definido, senão o efêmero da VNIC)"
+  value       = local.use_reserved_public_ip ? var.reserved_public_ip_address : oci_core_instance.instance.public_ip
 }
 
 output "instance_private_ip" {
