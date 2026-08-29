@@ -3,3 +3,8 @@ defaultSettings:
 
 preUpgradeChecker:
   jobEnabled: false
+
+# A StorageClass `longhorn` tambem precisa refletir o unico no. Sem isto ela
+# pede tres replicas e deixa todo PVC permanentemente Degraded.
+persistence:
+  defaultClassReplicaCount: 1
