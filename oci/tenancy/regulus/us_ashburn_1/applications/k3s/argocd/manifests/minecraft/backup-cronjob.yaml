@@ -54,8 +54,31 @@ spec:
 
                   volume="$(kubectl -n minecraft get pvc minecraft-data -o jsonpath='{.spec.volumeName}')"
                   test -n "$volume"
-                  previous="$(kubectl -n longhorn-system get backups -l "longhornvolume=$volume" --sort-by=.metadata.creationTimestamp -o jsonpath='{.items[-1:].metadata.name}' 2>/dev/null || true)"
                   snapshot="minecraft-$(date -u +%Y%m%dT%H%M%SZ)"
+                  printf '%s\n' \
+                    'apiVersion: longhorn.io/v1beta2' \
+                    'kind: Snapshot' \
+                    'metadata:' \
+                    "  name: $snapshot" \
+                    '  namespace: longhorn-system' \
+                    'spec:' \
+                    "  volume: $volume" \
+                    '  createSnapshot: true' \
+                    | kubectl -n longhorn-system create -f -
+
+                  snapshot_ready=false
+                  for _ in $(seq 1 60); do
+                    snapshot_error="$(kubectl -n longhorn-system get "snapshot/$snapshot" -o jsonpath='{.status.error}')"
+                    [ -z "$snapshot_error" ] || { echo "Snapshot $snapshot falhou: $snapshot_error" >&2; exit 1; }
+                    if [ "$(kubectl -n longhorn-system get "snapshot/$snapshot" -o jsonpath='{.status.readyToUse}')" = "true" ]; then
+                      snapshot_ready=true
+                      break
+                    fi
+                    sleep 5
+                  done
+                  test "$snapshot_ready" = true
+
+                  previous="$(kubectl -n longhorn-system get backups -l "backup-volume=$volume" --sort-by=.metadata.creationTimestamp -o jsonpath='{.items[-1:].metadata.name}' 2>/dev/null || true)"
                   printf '{"name":"%s"}\n' "$snapshot" >/tmp/backup-request.json
 
                   # Usa o proxy autenticado do apiserver: nao ha token Longhorn
@@ -66,7 +89,7 @@ spec:
 
                   backup=""
                   for _ in $(seq 1 60); do
-                    candidate="$(kubectl -n longhorn-system get backups -l "longhornvolume=$volume" --sort-by=.metadata.creationTimestamp -o jsonpath='{.items[-1:].metadata.name}' 2>/dev/null || true)"
+                    candidate="$(kubectl -n longhorn-system get backups -l "backup-volume=$volume" --sort-by=.metadata.creationTimestamp -o jsonpath='{.items[-1:].metadata.name}' 2>/dev/null || true)"
                     if [ -n "$candidate" ] && [ "$candidate" != "$previous" ]; then
                       backup="$candidate"
                       break
@@ -78,7 +101,10 @@ spec:
                   for _ in $(seq 1 510); do
                     state="$(kubectl -n longhorn-system get "backup/$backup" -o jsonpath='{.status.state}')"
                     case "$state" in
-                      Completed) exit 0 ;;
+                      Completed)
+                        kubectl -n longhorn-system delete "snapshot/$snapshot" --wait=false || true
+                        exit 0
+                        ;;
                       Error|Unknown) echo "Longhorn backup $backup terminou em $state" >&2; exit 1 ;;
                     esac
                     sleep 10

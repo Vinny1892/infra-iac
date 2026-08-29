@@ -76,8 +76,11 @@ rules:
     resourceNames: ["http:longhorn-backend:9500"]
     verbs: ["get", "create"]
   - apiGroups: ["longhorn.io"]
-    resources: ["backups", "backuptargets"]
+    resources: ["backups", "backuptargets", "snapshots"]
     verbs: ["get", "list"]
+  - apiGroups: ["longhorn.io"]
+    resources: ["snapshots"]
+    verbs: ["create", "delete"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
