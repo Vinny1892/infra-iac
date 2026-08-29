@@ -18,6 +18,12 @@ rules:
   - apiGroups: [""]
     resources: ["pods/exec"]
     verbs: ["create"]
+  # `kubectl exec deploy/minecraft` resolve o Deployment antes de selecionar o
+  # pod; nao concede escrita nem acesso a outros workloads.
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    resourceNames: ["minecraft"]
+    verbs: ["get"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
