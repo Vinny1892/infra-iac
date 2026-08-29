@@ -47,7 +47,11 @@ spec:
                   }
                   trap cleanup EXIT INT TERM
 
-                  test "$(kubectl -n longhorn-system get backuptarget default -o jsonpath='{.status.available}')" = "true"
+                  target_available="$(kubectl -n longhorn-system get backuptarget default -o jsonpath='{.status.available}')"
+                  if [ "$target_available" != "true" ]; then
+                    echo "BackupTarget Longhorn indisponivel (available=$target_available)" >&2
+                    exit 1
+                  fi
                   rcon save-off
                   saves_disabled=true
                   rcon save-all flush
