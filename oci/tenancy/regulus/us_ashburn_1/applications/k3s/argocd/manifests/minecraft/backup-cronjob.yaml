@@ -1,0 +1,80 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: minecraft-longhorn-backup
+  namespace: minecraft
+spec:
+  # 03:15 America/Campo_Grande (UTC-4). O campo timeZone evita o deslocamento
+  # silencioso caso o fuso do controller seja diferente.
+  schedule: "15 7 * * *"
+  timeZone: America/Campo_Grande
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      ttlSecondsAfterFinished: 604800
+      template:
+        spec:
+          serviceAccountName: minecraft-backup
+          restartPolicy: Never
+          containers:
+            - name: backup
+              image: bitnami/kubectl:1.33.1
+              command:
+                - /bin/sh
+                - -ec
+                - |
+                  rcon() {
+                    kubectl -n minecraft exec deploy/minecraft -- rcon-cli "$@"
+                  }
+
+                  # Sempre reabilita saves, inclusive quando o backup falha ou
+                  # quando o Job e encerrado pelo controller.
+                  saves_disabled=false
+                  cleanup() {
+                    if [ "$saves_disabled" = true ]; then
+                      rcon save-on || echo "WARN: nao foi possivel executar save-on"
+                    fi
+                  }
+                  trap cleanup EXIT INT TERM
+
+                  test "$(kubectl -n longhorn-system get backuptarget default -o jsonpath='{.status.available}')" = "true"
+                  rcon save-off
+                  saves_disabled=true
+                  rcon save-all flush
+
+                  volume="$(kubectl -n minecraft get pvc minecraft-data -o jsonpath='{.spec.volumeName}')"
+                  test -n "$volume"
+                  previous="$(kubectl -n longhorn-system get backups -l "longhornvolume=$volume" --sort-by=.metadata.creationTimestamp -o jsonpath='{.items[-1:].metadata.name}' 2>/dev/null || true)"
+                  snapshot="minecraft-$(date -u +%Y%m%dT%H%M%SZ)"
+                  printf '{"name":"%s"}\n' "$snapshot" >/tmp/backup-request.json
+
+                  # Usa o proxy autenticado do apiserver: nao ha token Longhorn
+                  # nem endpoint administrativo exposto ao pod.
+                  kubectl -n longhorn-system create --raw \
+                    "/api/v1/namespaces/longhorn-system/services/http:longhorn-backend:9500/proxy/v1/volumes/$volume?action=snapshotBackup" \
+                    -f /tmp/backup-request.json >/dev/null
+
+                  backup=""
+                  for _ in $(seq 1 60); do
+                    candidate="$(kubectl -n longhorn-system get backups -l "longhornvolume=$volume" --sort-by=.metadata.creationTimestamp -o jsonpath='{.items[-1:].metadata.name}' 2>/dev/null || true)"
+                    if [ -n "$candidate" ] && [ "$candidate" != "$previous" ]; then
+                      backup="$candidate"
+                      break
+                    fi
+                    sleep 5
+                  done
+                  test -n "$backup"
+
+                  for _ in $(seq 1 510); do
+                    state="$(kubectl -n longhorn-system get "backup/$backup" -o jsonpath='{.status.state}')"
+                    case "$state" in
+                      Completed) exit 0 ;;
+                      Error|Unknown) echo "Longhorn backup $backup terminou em $state" >&2; exit 1 ;;
+                    esac
+                    sleep 10
+                  done
+                  echo "Timeout aguardando o backup Longhorn $backup" >&2
+                  exit 1

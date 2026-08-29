@@ -25,6 +25,8 @@ inputs = {
   additional_ingress_rules = [
     { source = "0.0.0.0/0", protocol = "6", tcp_options = { min = 80,   max = 80 } },
     { source = "0.0.0.0/0", protocol = "6", tcp_options = { min = 443,  max = 443 } },
+    # Minecraft Java. O RCON (25575) continua exclusivamente interno no K3s.
+    { source = "0.0.0.0/0", protocol = "6", tcp_options = { min = 25565, max = 25565 } },
     { source = "0.0.0.0/0", protocol = "6", tcp_options = { min = 6443, max = 6443 } },
   ]
 }

@@ -1,0 +1,14 @@
+# Explicitamente Longhorn: local-path e longhorn sao ambos default neste
+# cluster, portanto deixar a escolha implicita pode criar um mundo sem backup.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: minecraft-data
+  namespace: minecraft
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: longhorn
+  resources:
+    requests:
+      storage: 30Gi

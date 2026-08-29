@@ -110,6 +110,11 @@ deploy_helms() {
   K3S_OCI_KUBECONFIG="$KUBECONFIG_PATH" terragrunt apply --auto-approve
 }
 
+bootstrap_backup_secrets() {
+  echo "==> Configurando credenciais minimas do Longhorn e RCON no 1Password/Kubernetes..."
+  bash "$SCRIPT_DIR/bootstrap-longhorn-backup.sh"
+}
+
 deploy_root_app() {
   # O root app precisa do repo-server de pe para gerar manifests. Aplicado antes
   # disso, o ArgoCD grava um ComparisonError ("connection refused" na 8081) e a
@@ -175,12 +180,14 @@ case "$MODE" in
     VM_IP=$(wait_for_k3s)
     fetch_kubeconfig "$VM_IP"
     deploy_helms
+    bootstrap_backup_secrets
     deploy_root_app
     verify
     ;;
   helms-only)
     preflight_check
     deploy_helms
+    bootstrap_backup_secrets
     deploy_root_app
     ;;
   verify)

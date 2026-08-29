@@ -1,0 +1,86 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: minecraft-backup
+  namespace: minecraft
+---
+# O Job le somente o PVC proprio, executa o RCON no pod do Minecraft e consulta
+# o PV que identifica o volume Longhorn.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: minecraft-backup
+  namespace: minecraft
+rules:
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims", "pods"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: minecraft-backup
+  namespace: minecraft
+subjects:
+  - kind: ServiceAccount
+    name: minecraft-backup
+    namespace: minecraft
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: minecraft-backup
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: minecraft-backup-pv-read
+rules:
+  - apiGroups: [""]
+    resources: ["persistentvolumes"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: minecraft-backup-pv-read
+subjects:
+  - kind: ServiceAccount
+    name: minecraft-backup
+    namespace: minecraft
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: minecraft-backup-pv-read
+---
+# A API do Longhorn fica atras do Service interno. Esta permissao permite
+# somente o proxy desse Service e leitura do estado dos backups/alvo.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: minecraft-backup-longhorn
+  namespace: longhorn-system
+rules:
+  - apiGroups: [""]
+    resources: ["services/proxy"]
+    resourceNames: ["longhorn-backend"]
+    verbs: ["get", "create"]
+  - apiGroups: ["longhorn.io"]
+    resources: ["backups", "backuptargets"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: minecraft-backup-longhorn
+  namespace: longhorn-system
+subjects:
+  - kind: ServiceAccount
+    name: minecraft-backup
+    namespace: minecraft
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: minecraft-backup-longhorn
