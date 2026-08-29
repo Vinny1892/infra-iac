@@ -72,9 +72,12 @@ if ! op item get "$RCON_ITEM" --vault "$VAULT" --format json >"$TMP_DIR/rcon-ite
     | op item create --vault "$VAULT" - >/dev/null
 fi
 
-op read "op://$VAULT/$S3_ITEM/username" >"$TMP_DIR/AWS_ACCESS_KEY_ID"
-op read "op://$VAULT/$S3_ITEM/password" >"$TMP_DIR/AWS_SECRET_ACCESS_KEY"
-op read "op://$VAULT/$RCON_ITEM/password" >"$TMP_DIR/rcon-password"
+# `op read` imprime newline. Kubernetes preserva bytes de --from-file, entao
+# remover esse byte aqui e essencial: ele invalida a assinatura AWS e tambem
+# alteraria a senha RCON.
+printf %s "$(op read "op://$VAULT/$S3_ITEM/username")" >"$TMP_DIR/AWS_ACCESS_KEY_ID"
+printf %s "$(op read "op://$VAULT/$S3_ITEM/password")" >"$TMP_DIR/AWS_SECRET_ACCESS_KEY"
+printf %s "$(op read "op://$VAULT/$RCON_ITEM/password")" >"$TMP_DIR/rcon-password"
 chmod 600 "$TMP_DIR"/*
 
 "${KUBECTL[@]}" get namespace minecraft >/dev/null 2>&1 || "${KUBECTL[@]}" create namespace minecraft
