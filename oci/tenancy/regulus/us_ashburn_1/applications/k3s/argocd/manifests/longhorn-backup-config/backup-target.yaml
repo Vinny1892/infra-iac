@@ -1,0 +1,12 @@
+# O chart v1.7 cria o BackupTarget inicial, mas seus defaultSettings nao
+# atualizam a credencial depois da instalacao. Este CR e a fonte GitOps
+# explicita; o Secret referenciado e criado fora do Git pelo bootstrap.
+apiVersion: longhorn.io/v1beta2
+kind: BackupTarget
+metadata:
+  name: default
+  namespace: longhorn-system
+spec:
+  backupTargetURL: s3://backup-longhorn-k3s@us-east-1/
+  credentialSecret: longhorn-aws-backup
+  pollInterval: 5m0s

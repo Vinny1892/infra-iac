@@ -1,11 +1,5 @@
 defaultSettings:
   defaultReplicaCount: 1
-  # O volume local e a unica replica vivem no mesmo no K3s. O alvo remoto e a
-  # camada de recuperacao de desastre: snapshots locais nao sobrevivem a perda
-  # da VM/disco. O Secret e criado por bootstrap-longhorn-backup.sh e nunca vai
-  # para o Git.
-  backupTarget: s3://backup-longhorn-k3s@us-east-1/
-  backupTargetCredentialSecret: longhorn-aws-backup
 
 preUpgradeChecker:
   jobEnabled: false
