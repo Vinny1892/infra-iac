@@ -18,6 +18,11 @@ spec:
       template:
         spec:
           serviceAccountName: minecraft-backup
+          # Este no nao anuncia rota do CNI para o Service IP do apiserver
+          # (10.43.0.1) aos pods novos. O Job precisa somente da API local;
+          # hostNetwork usa a rota do proprio no, sem hostPath ou privilege.
+          hostNetwork: true
+          dnsPolicy: ClusterFirstWithHostNet
           restartPolicy: Never
           containers:
             - name: backup
