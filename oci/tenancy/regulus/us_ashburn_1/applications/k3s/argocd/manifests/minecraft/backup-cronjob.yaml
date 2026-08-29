@@ -21,7 +21,9 @@ spec:
           restartPolicy: Never
           containers:
             - name: backup
-              image: bitnami/kubectl:1.33.1
+              # Bitnami removeu este tag do Docker Hub. A imagem do Rancher e
+              # publicada junto do ecossistema K3s e tem shell + kubectl.
+              image: rancher/kubectl:v1.33.1
               command:
                 - /bin/sh
                 - -ec
