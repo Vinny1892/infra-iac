@@ -11,4 +11,7 @@ spec:
   storageClassName: longhorn
   resources:
     requests:
-      storage: 30Gi
+      # O disco Longhorn deste no tem cerca de 28 Gi livres apos a reserva do
+      # proprio Longhorn e o PVC do Hermes. 25 Gi deixa margem para snapshots
+      # temporarios e para o sistema continuar agendavel.
+      storage: 25Gi
