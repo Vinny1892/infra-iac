@@ -54,7 +54,8 @@ spec:
 
                   volume="$(kubectl -n minecraft get pvc minecraft-data -o jsonpath='{.spec.volumeName}')"
                   test -n "$volume"
-                  snapshot="minecraft-$(date -u +%Y%m%dT%H%M%SZ)"
+                  # metadata.name de um CR Kubernetes exige RFC 1123 lowercase.
+                  snapshot="minecraft-$(date -u +%Y%m%dt%H%M%Sz)"
                   printf '%s\n' \
                     'apiVersion: longhorn.io/v1beta2' \
                     'kind: Snapshot' \
