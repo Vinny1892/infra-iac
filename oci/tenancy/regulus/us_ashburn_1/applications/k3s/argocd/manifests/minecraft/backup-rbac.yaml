@@ -71,7 +71,9 @@ metadata:
 rules:
   - apiGroups: [""]
     resources: ["services/proxy"]
-    resourceNames: ["longhorn-backend"]
+    # O apiserver autoriza um Service proxy pelo nome composto que inclui a
+    # porta do proxy, nao pelo nome simples do Service.
+    resourceNames: ["http:longhorn-backend:9500"]
     verbs: ["get", "create"]
   - apiGroups: ["longhorn.io"]
     resources: ["backups", "backuptargets"]
