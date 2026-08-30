@@ -8,17 +8,31 @@ PUBLIC_IP="${1:?Usage: $0 <PUBLIC_IP> [DNS_NAME]}"
 DNS_NAME="${2:-}"
 K3S_VERSION="v1.36.4+k3s1"
 
-# O Ubuntu dispara apt-daily/unattended-upgrades no primeiro boot e segura o
-# lock do apt. Sem tratar isso, o apt-get abaixo morre com "Could not get lock
-# /var/lib/apt/lists/lock" e o set -e derruba o script antes de instalar o K3s.
-echo "==> Desarmando apt-daily para liberar o lock do apt"
+# Quem disputa o lock do apt no primeiro boot NAO e o apt-daily: e o snap do
+# Oracle Cloud Agent, que roda `/bin/apt update` sozinho quando a instancia sobe
+# (no journal: "snap_daemon ... COMMAND=/bin/apt update"). Ele nao esta sob nosso
+# controle, e `DPkg::Lock::Timeout` nao cobre o lock de /var/lib/apt/lists, que e
+# o disputado pelo `apt-get update`. A saida confiavel e insistir.
 systemctl stop apt-daily.service apt-daily-upgrade.service unattended-upgrades.service 2>/dev/null || true
 systemctl disable --now apt-daily.timer apt-daily-upgrade.timer 2>/dev/null || true
-APT_OPTS="-o DPkg::Lock::Timeout=600"
+
+apt_retry() {
+  local desc="$1"; shift
+  local i
+  for i in $(seq 1 60); do
+    if "$@"; then
+      return 0
+    fi
+    echo "  apt ocupado em '$desc' (tentativa $i/60); aguardando 10s..."
+    sleep 10
+  done
+  echo "ERRO: '$desc' nao concluiu apos 10 min aguardando o lock do apt."
+  exit 1
+}
 
 echo "==> Installing Longhorn prerequisites"
-apt-get $APT_OPTS update -y
-apt-get $APT_OPTS install -y open-iscsi nfs-common
+apt_retry "update" apt-get -o DPkg::Lock::Timeout=600 update -y
+apt_retry "open-iscsi nfs-common" apt-get -o DPkg::Lock::Timeout=600 install -y open-iscsi nfs-common
 systemctl enable --now iscsid
 
 echo "==> Abrindo portas no iptables (OCI Ubuntu bloqueia por default)"
@@ -27,7 +41,7 @@ iptables -I INPUT -p tcp --dport 80 -j ACCEPT
 iptables -I INPUT -p tcp --dport 443 -j ACCEPT
 iptables -I INPUT -p tcp --dport 10250 -j ACCEPT
 iptables -I INPUT -p udp --dport 8472 -j ACCEPT
-apt-get $APT_OPTS install -y iptables-persistent -q
+apt_retry "iptables-persistent" apt-get -o DPkg::Lock::Timeout=600 install -y iptables-persistent -q
 netfilter-persistent save
 
 echo "==> K3s ${K3S_VERSION} instalando..."
