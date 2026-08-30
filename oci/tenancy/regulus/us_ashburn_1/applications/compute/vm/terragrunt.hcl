@@ -93,9 +93,19 @@ inputs = {
       exit 1
     }
 
+    # O Ubuntu dispara apt-daily/unattended-upgrades no primeiro boot e segura o
+    # lock do apt. Sem tratar isso, o apt-get abaixo morre com "Could not get
+    # lock /var/lib/apt/lists/lock" e o set -e derruba o user_data inteiro antes
+    # do K3s ser instalado — a VM sobe RUNNING mas sem cluster nenhum.
+    echo "==> Desarmando apt-daily para liberar o lock do apt"
+    systemctl stop apt-daily.service apt-daily-upgrade.service unattended-upgrades.service 2>/dev/null || true
+    systemctl disable --now apt-daily.timer apt-daily-upgrade.timer 2>/dev/null || true
+    # Rede de seguranca: se o lock ainda estiver ocupado, o apt espera em vez de falhar.
+    APT_OPTS="-o DPkg::Lock::Timeout=600"
+
     echo "==> Instalando pre-requisitos Longhorn"
-    apt-get update -y
-    apt-get install -y open-iscsi nfs-common
+    apt-get $APT_OPTS update -y
+    apt-get $APT_OPTS install -y open-iscsi nfs-common
     systemctl enable --now iscsid
 
     echo "==> Abrindo portas no iptables"
@@ -104,7 +114,7 @@ inputs = {
     iptables -I INPUT -p tcp --dport 443  -j ACCEPT
     iptables -I INPUT -p tcp --dport 10250 -j ACCEPT
     iptables -I INPUT -p udp --dport 8472  -j ACCEPT
-    apt-get install -y iptables-persistent -q
+    apt-get $APT_OPTS install -y iptables-persistent -q
     netfilter-persistent save
 
     echo "==> Instalando K3s $K3S_VERSION"
