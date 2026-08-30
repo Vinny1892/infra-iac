@@ -176,6 +176,11 @@ eval $(op signin)
 - `GitHub App` — fields `owner`, `app_id`, `installation_id`, `repo_name`, `private_key` (used by ArgoCD repo auth)
 - `GitHub OAuth ArgoCD` — fields `client_id`, `client_secret` (used by ArgoCD Dex GitHub login)
 
+**SSH da OCI Regulus:** a chave oficial e o item `Pessoal`, no vault
+`Personal` (`op://Personal/Pessoal`). Leia as chaves publica/privada em runtime com
+o 1Password CLI; nunca use `~/.ssh/id_ed25519` como fallback, nunca grave a chave
+privada no repositorio e nunca a inclua em logs.
+
 The `deploy.sh` script validates `op` CLI auth before running (preflight check).
 
 ### K3s Cluster Lifecycle

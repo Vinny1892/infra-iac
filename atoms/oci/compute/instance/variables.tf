@@ -60,6 +60,12 @@ variable "ssh_public_key_path" {
   default     = "~/.ssh/id_ed25519.pub"
 }
 
+variable "ssh_authorized_keys" {
+  description = "Conteúdo das chaves públicas SSH autorizadas. Quando definido, prevalece sobre ssh_public_key_path."
+  type        = string
+  default     = ""
+}
+
 variable "ssh_port" {
   description = "Porta SSH configurada no sshd_config via cloud-init"
   type        = number
@@ -106,4 +112,34 @@ variable "boot_volume_size_in_gbs" {
   description = "Tamanho do boot volume em GB. Null usa o tamanho da imagem (47 GB no Ubuntu aarch64). Mínimo 47, franquia Always Free é 200 GB somando todos os volumes."
   type        = number
   default     = null
+}
+
+variable "data_volume_size_in_gbs" {
+  description = "Tamanho opcional do block volume de dados em GB. Null não cria volume adicional."
+  type        = number
+  default     = null
+}
+
+variable "data_volume_display_name" {
+  description = "Nome do block volume de dados. Vazio usa <instance_name>-data."
+  type        = string
+  default     = ""
+}
+
+variable "data_volume_vpus_per_gb" {
+  description = "Performance do block volume em VPUs por GB. 10 corresponde ao perfil Balanced."
+  type        = number
+  default     = 10
+}
+
+variable "data_volume_device" {
+  description = "Caminho consistente apresentado à instância para o block volume."
+  type        = string
+  default     = "/dev/oracleoci/oraclevdb"
+}
+
+variable "enable_run_command_plugin" {
+  description = "Habilita o plugin Compute Instance Run Command do Oracle Cloud Agent."
+  type        = bool
+  default     = false
 }

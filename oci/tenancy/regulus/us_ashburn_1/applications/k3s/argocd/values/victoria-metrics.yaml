@@ -1,0 +1,123 @@
+nameOverride: vmks
+argocdReleaseOverride: vmks
+
+victoria-metrics-operator:
+  resources:
+    requests:
+      cpu: 80m
+      memory: 128Mi
+    limits:
+      cpu: 250m
+      memory: 256Mi
+
+vmsingle:
+  enabled: true
+  spec:
+    retentionPeriod: 14d
+    resources:
+      requests:
+        cpu: 200m
+        memory: 512Mi
+      limits:
+        cpu: 750m
+        memory: 1Gi
+    storage:
+      storageClassName: longhorn
+      accessModes:
+        - ReadWriteOnce
+      resources:
+        requests:
+          storage: 10Gi
+
+vmcluster:
+  enabled: false
+
+vmdistributed:
+  enabled: false
+
+vlsingle:
+  enabled: false
+
+vtsingle:
+  enabled: false
+
+alertmanager:
+  enabled: false
+
+vmalert:
+  enabled: false
+
+vmagent:
+  enabled: true
+  spec:
+    scrapeInterval: 30s
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 300m
+        memory: 512Mi
+    extraArgs:
+      promscrape.streamParse: "true"
+
+grafana:
+  enabled: true
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 300m
+      memory: 512Mi
+  persistence:
+    enabled: true
+    type: pvc
+    storageClassName: longhorn
+    accessModes:
+      - ReadWriteOnce
+    size: 2Gi
+  ingress:
+    enabled: true
+    ingressClassName: traefik
+    annotations:
+      cert-manager.io/cluster-issuer: letsencrypt-prod
+      external-dns.alpha.kubernetes.io/hostname: grafana-k3s.vinny.dev.br
+    hosts:
+      - grafana-k3s.vinny.dev.br
+    tls:
+      - secretName: grafana-k3s-tls
+        hosts:
+          - grafana-k3s.vinny.dev.br
+
+prometheus-node-exporter:
+  resources:
+    requests:
+      cpu: 30m
+      memory: 32Mi
+    limits:
+      cpu: 100m
+      memory: 64Mi
+
+kube-state-metrics:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 150m
+      memory: 128Mi
+
+# Estes componentes do K3s nao expõem os endpoints da mesma forma que um
+# cluster kubeadm; desabilitar os scrapes evita targets e alertas falsos.
+kubeControllerManager:
+  enabled: false
+
+kubeScheduler:
+  enabled: false
+
+kubeEtcd:
+  enabled: false
+
+kubeProxy:
+  enabled: false

@@ -51,6 +51,17 @@ resource "oci_core_instance" "instance" {
     memory_in_gbs = var.memory_in_gbs
   }
 
+  dynamic "agent_config" {
+    for_each = var.enable_run_command_plugin ? [1] : []
+
+    content {
+      plugins_config {
+        desired_state = "ENABLED"
+        name          = "Compute Instance Run Command"
+      }
+    }
+  }
+
   source_details {
     source_type             = "image"
     source_id               = var.image_id
@@ -64,13 +75,44 @@ resource "oci_core_instance" "instance" {
   }
 
   metadata = {
-    ssh_authorized_keys = file(var.ssh_public_key_path)
+    ssh_authorized_keys = var.ssh_authorized_keys != "" ? var.ssh_authorized_keys : file(var.ssh_public_key_path)
     user_data           = local.effective_user_data
   }
 
   freeform_tags = {
     Name = var.instance_name
   }
+
+  # A OCI trata mudanças em ssh_authorized_keys como replacement da instância.
+  # A chave configurada continua sendo usada em criações novas; rotações em nós
+  # existentes devem atualizar authorized_keys dentro do sistema operacional.
+  lifecycle {
+    ignore_changes = [metadata["ssh_authorized_keys"]]
+  }
+}
+
+resource "oci_core_volume" "data" {
+  count = var.data_volume_size_in_gbs != null ? 1 : 0
+
+  availability_domain = var.availability_domain
+  compartment_id      = var.compartment_id
+  display_name        = var.data_volume_display_name != "" ? var.data_volume_display_name : "${var.instance_name}-data"
+  size_in_gbs         = var.data_volume_size_in_gbs
+  vpus_per_gb         = var.data_volume_vpus_per_gb
+
+  freeform_tags = {
+    Name = var.data_volume_display_name != "" ? var.data_volume_display_name : "${var.instance_name}-data"
+  }
+}
+
+resource "oci_core_volume_attachment" "data" {
+  count = var.data_volume_size_in_gbs != null ? 1 : 0
+
+  attachment_type = "paravirtualized"
+  device          = var.data_volume_device
+  display_name    = "${var.instance_name}-data-attachment"
+  instance_id     = oci_core_instance.instance.id
+  volume_id       = oci_core_volume.data[0].id
 }
 
 # Anexação do IP público reservado à VNIC primária.

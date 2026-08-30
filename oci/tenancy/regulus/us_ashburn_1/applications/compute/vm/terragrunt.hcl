@@ -52,6 +52,15 @@ inputs = {
   ocpus               = 4
   memory_in_gbs       = 24
   image_id            = local.region_vars.locals.image_id
+  ssh_authorized_keys = run_cmd("--terragrunt-quiet", "op", "read", "op://Personal/Pessoal/public key")
+
+  # Volume dedicado ao Longhorn. Boot (47 GB) + dados (100 GB) permanecem
+  # abaixo dos 200 GB combinados da franquia Always Free desta tenancy.
+  data_volume_size_in_gbs   = 100
+  data_volume_display_name  = "vm-regulus-longhorn"
+  data_volume_vpus_per_gb   = 10
+  data_volume_device        = "/dev/oracleoci/oraclevdb"
+  enable_run_command_plugin = true
 
   reserved_public_ip_id      = dependency.reserved_ip.outputs.public_ip_id
   reserved_public_ip_address = dependency.reserved_ip.outputs.public_ip_address

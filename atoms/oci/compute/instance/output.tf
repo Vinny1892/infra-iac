@@ -22,3 +22,13 @@ output "secondary_vnic_ids" {
   description = "IDs das VNICs secundárias anexadas"
   value       = [for attachment in oci_core_vnic_attachment.secondary : attachment.vnic_id]
 }
+
+output "data_volume_id" {
+  description = "OCID do block volume de dados, ou null quando desabilitado"
+  value       = try(oci_core_volume.data[0].id, null)
+}
+
+output "data_volume_attachment_id" {
+  description = "OCID do attachment do block volume de dados, ou null quando desabilitado"
+  value       = try(oci_core_volume_attachment.data[0].id, null)
+}

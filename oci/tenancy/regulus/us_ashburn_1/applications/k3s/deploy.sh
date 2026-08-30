@@ -4,10 +4,21 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 OCI_UNIT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"  # us_ashburn_1/
 
-SSH_KEY="${SSH_KEY:-$HOME/.ssh/id_ed25519}"
+SSH_KEY_REF="op://Personal/Pessoal/private key?ssh-format=openssh"
+SSH_PUBLIC_KEY_REF="op://Personal/Pessoal/public key"
+SSH_KEY=""
 SSH_PORT="22"
 SSH_USER="ubuntu"
 KUBECONFIG_PATH="${K3S_OCI_KUBECONFIG:-$HOME/.kube/k3s-oci.yaml}"
+TEMP_SSH_KEY=""
+
+cleanup() {
+  if [ -n "$TEMP_SSH_KEY" ] && [ -f "$TEMP_SSH_KEY" ]; then
+    rm -f "$TEMP_SSH_KEY"
+  fi
+}
+
+trap cleanup EXIT
 
 preflight_check() {
   if ! op vault list &>/dev/null; then
@@ -15,6 +26,12 @@ preflight_check() {
     echo "  Exporte OP_SERVICE_ACCOUNT_TOKEN ou rode: eval \$(op signin)"
     exit 1
   fi
+}
+
+prepare_ssh_key() {
+  TEMP_SSH_KEY=$(mktemp /tmp/regulus-ssh-key.XXXXXX)
+  op read --out-file "$TEMP_SSH_KEY" --file-mode 0600 --force "$SSH_KEY_REF" >/dev/null
+  SSH_KEY="$TEMP_SSH_KEY"
 }
 
 get_vm_ip() {
@@ -31,6 +48,73 @@ provision_vm() {
   terragrunt apply --auto-approve
   cd "$OCI_UNIT_DIR/applications/compute/vm"
   terragrunt apply --auto-approve
+}
+
+configure_regulus_host() {
+  local instance_id
+  instance_id=$(cd "$OCI_UNIT_DIR/applications/compute/vm" && terragrunt output -raw instance_id)
+
+  echo "==> Aguardando o plugin Compute Instance Run Command..."
+  local plugin_status=""
+  for i in $(seq 1 60); do
+    plugin_status=$(oci instance-agent plugin list \
+      --compartment-id "ocid1.tenancy.oc1..aaaaaaaa67vhrp637voglpe2gux3tnf2adhohpxlild2hepev4friacmlcwq" \
+      --instanceagent-id "$instance_id" \
+      --name "Compute Instance Run Command" \
+      --query 'data[0].status' --raw-output 2>/dev/null || true)
+    if [ "$plugin_status" = "RUNNING" ]; then
+      break
+    fi
+    echo "  Tentativa $i/60 — status ${plugin_status:-indisponivel}; aguardando 10s..."
+    sleep 10
+  done
+
+  if [ "$plugin_status" != "RUNNING" ]; then
+    echo "ERROR: plugin Compute Instance Run Command nao ficou RUNNING."
+    exit 1
+  fi
+
+  local script_b64 public_key_b64 remote_command target_json content_json command_id
+  script_b64=$(base64 -w0 "$SCRIPT_DIR/scripts/configure-regulus-host.sh")
+  public_key_b64=$(op read "$SSH_PUBLIC_KEY_REF" | base64 -w0)
+  remote_command="printf '%s' '$script_b64' | base64 --decode | REGULUS_SSH_PUBLIC_KEY_B64='$public_key_b64' bash"
+  target_json=$(jq -cn --arg id "$instance_id" '{instanceId: $id}')
+  content_json=$(jq -cn --arg command "$remote_command" \
+    '{source: {sourceType: "TEXT", text: $command}, output: {outputType: "TEXT"}}')
+
+  echo "==> Configurando chave SSH e volume dedicado do Longhorn..."
+  command_id=$(oci instance-agent command create \
+    --compartment-id "ocid1.tenancy.oc1..aaaaaaaa67vhrp637voglpe2gux3tnf2adhohpxlild2hepev4friacmlcwq" \
+    --target "$target_json" \
+    --content "$content_json" \
+    --display-name "configure-regulus-host" \
+    --timeout-in-seconds 900 \
+    --query 'data.id' --raw-output)
+
+  local status=""
+  for i in $(seq 1 100); do
+    status=$(oci instance-agent command-execution get \
+      --instance-id "$instance_id" \
+      --command-id "$command_id" \
+      --query 'data.status' --raw-output)
+    case "$status" in
+      SUCCEEDED)
+        echo "Host Regulus configurado."
+        return 0
+        ;;
+      FAILED|TIMED_OUT|CANCELED)
+        echo "ERROR: Run Command terminou com status $status."
+        oci instance-agent command-execution get \
+          --instance-id "$instance_id" --command-id "$command_id"
+        exit 1
+        ;;
+    esac
+    echo "  Run Command $status ($i/100); aguardando 10s..."
+    sleep 10
+  done
+
+  echo "ERROR: Run Command nao terminou dentro do prazo."
+  exit 1
 }
 
 wait_for_k3s() {
@@ -177,6 +261,8 @@ case "$MODE" in
   deploy)
     preflight_check
     provision_vm
+    configure_regulus_host
+    prepare_ssh_key
     VM_IP=$(wait_for_k3s)
     fetch_kubeconfig "$VM_IP"
     deploy_helms
@@ -195,6 +281,7 @@ case "$MODE" in
     ;;
   destroy)
     preflight_check
+    prepare_ssh_key
     destroy
     ;;
   *)
