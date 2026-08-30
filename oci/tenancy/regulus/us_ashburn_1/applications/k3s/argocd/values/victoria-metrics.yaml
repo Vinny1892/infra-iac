@@ -35,8 +35,49 @@ vmcluster:
 vmdistributed:
   enabled: false
 
+# VictoriaLogs. Escolhido no lugar do Loki por coerencia de plataforma: o
+# operator VictoriaMetrics ja roda neste cluster e ja traz os CRDs de logs
+# (vlsingle, vlagent), entao nao entra operator nem chart novo. A limitacao do
+# VictoriaLogs de nao ter backend S3 nao pesa aqui, porque o PVC fica no Longhorn
+# e o backup remoto para S3 ja e feito por ele.
 vlsingle:
-  enabled: false
+  enabled: true
+  spec:
+    # Mesma janela do vmsingle: metrica e log da mesma hora contam a mesma
+    # historia, e retencoes diferentes tornam a correlacao confusa.
+    retentionPeriod: 14d
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 1Gi
+    storage:
+      storageClassName: longhorn
+      accessModes:
+        - ReadWriteOnce
+      resources:
+        requests:
+          # Com os 20Gi daqui o total alocado no Longhorn vai a ~57Gi dos 96Gi
+          # disponiveis, deixando margem para snapshot e rebuild.
+          storage: 20Gi
+
+# Coletor de logs. O k8sCollector le os logs dos containers do node e envia ao
+# vlsingle — por isso nao ha Promtail (EOL em marco/2026), Vector ou Fluent Bit
+# nesta stack: a coleta ja vem do proprio ecossistema.
+vlagent:
+  enabled: true
+  spec:
+    k8sCollector:
+      enabled: true
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        cpu: 300m
+        memory: 512Mi
 
 vtsingle:
   enabled: false
@@ -63,6 +104,11 @@ vmagent:
 
 grafana:
   enabled: true
+  # O datasource VictoriaLogs e provisionado pelo proprio chart
+  # (defaultDatasources.victorialogs), mas depende deste plugin. O Grafana
+  # baixa na inicializacao do pod, entao exige saida para a internet.
+  plugins:
+    - victoriametrics-logs-datasource
   resources:
     requests:
       cpu: 100m
