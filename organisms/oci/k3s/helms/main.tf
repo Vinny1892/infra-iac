@@ -168,8 +168,13 @@ resource "helm_release" "longhorn" {
   version          = "1.12.1"
   namespace        = "longhorn-system"
   create_namespace = true
-  timeout          = 600
-  wait             = false
+  # Menor que os demais releases de proposito. Com `wait = false` a instalacao
+  # retorna na hora, entao este timeout governa quase so a remocao: e o teto de
+  # espera pelo job longhorn-uninstall. O pre-destroy.sh ja drena os volumes
+  # antes, entao o uninstall deve ser rapido — se passar disto, algo esta errado
+  # e falhar em 3 min e melhor que penar 10 antes do mesmo desfecho.
+  timeout = 180
+  wait    = false
 
   values = [
     yamlencode({

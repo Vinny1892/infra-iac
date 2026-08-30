@@ -35,6 +35,35 @@ backup_minecraft_world() {
   echo "==> Backup remoto final do Minecraft concluido."
 }
 
+wait_longhorn_volumes_drained() {
+  # `kubectl delete pvc` retorna assim que o objeto sai da API, mas o Longhorn
+  # ainda esta desanexando e apagando o volume por baixo. O `helm destroy` que
+  # roda logo depois dispara o job longhorn-uninstall, que por design espera
+  # todos os volumes sumirem — ele acabava herdando esse trabalho pendente e
+  # estourando o timeout do release. Esperar aqui e mais barato e observavel.
+  if ! $KUBECTL get crd volumes.longhorn.io >/dev/null 2>&1; then
+    echo "==> Longhorn nao instalado; nada a drenar."
+    return 0
+  fi
+
+  echo "==> Aguardando o Longhorn liberar os volumes..."
+  local restantes
+  for i in $(seq 1 60); do
+    restantes=$($KUBECTL get volumes.longhorn.io -n longhorn-system --no-headers 2>/dev/null | wc -l)
+    if [ "$restantes" -eq 0 ]; then
+      echo "  Todos os volumes do Longhorn foram liberados."
+      return 0
+    fi
+    echo "  $restantes volume(s) ainda presente(s) ($i/60); aguardando 10s..."
+    sleep 10
+  done
+
+  # Nao aborta: o destino da VM e ser destruida de qualquer forma. Mas registra
+  # o que sobrou, para o timeout seguinte deixar de ser um misterio.
+  echo "  AVISO: ainda restam volumes no Longhorn apos 10 min."
+  $KUBECTL get volumes.longhorn.io -n longhorn-system 2>/dev/null || true
+}
+
 backup_minecraft_world
 
 echo "==> Deleting ArgoCD applications..."
@@ -44,7 +73,13 @@ echo "==> Waiting for ArgoCD to clean up resources..."
 sleep 30
 
 echo "==> Deleting PVCs across all namespaces..."
-$KUBECTL delete pvc --all-namespaces --all --timeout=120s 2>/dev/null || echo "No PVCs found."
+# Sem o `2>/dev/null || echo "No PVCs found."` de antes: aquilo transformava um
+# timeout real em uma mensagem tranquilizadora e escondia a causa do travamento.
+if ! $KUBECTL delete pvc --all-namespaces --all --timeout=120s; then
+  echo "  AVISO: o delete de PVCs nao concluiu no prazo."
+fi
+
+wait_longhorn_volumes_drained
 
 # O uninstall do K3s NAO acontece aqui. Ele derruba o API server, e o
 # `terragrunt destroy` dos helm releases — que roda depois deste script — precisa

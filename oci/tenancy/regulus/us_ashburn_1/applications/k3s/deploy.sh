@@ -275,7 +275,18 @@ destroy() {
   if [ -n "${lock_id:-}" ]; then
     terragrunt force-unlock -force "$lock_id" 2>/dev/null || true
   fi
-  K3S_OCI_KUBECONFIG="$KUBECONFIG_PATH" terragrunt destroy --auto-approve || true
+  # O `|| true` continua: a VM e destruida logo abaixo, entao um release orfao
+  # no state e inofensivo — o apply seguinte reconcilia. O que faltava era
+  # explicar POR QUE falhou. Sem isto, o timeout do longhorn-uninstall aparecia
+  # apenas como "timed out waiting for the condition", sem causa.
+  if ! K3S_OCI_KUBECONFIG="$KUBECONFIG_PATH" terragrunt destroy --auto-approve; then
+    echo "AVISO: destroy dos helm releases falhou. Coletando diagnostico..."
+    local kc=(kubectl --kubeconfig "$KUBECONFIG_PATH" -n longhorn-system)
+    "${kc[@]}" get jobs 2>/dev/null || true
+    "${kc[@]}" logs job/longhorn-uninstall --tail=40 2>/dev/null \
+      || echo "  (sem job longhorn-uninstall — a falha veio de outro release)"
+    "${kc[@]}" get volumes.longhorn.io 2>/dev/null || true
+  fi
 
   # Uninstall do K3s so agora: antes do destroy acima o cluster precisa estar
   # vivo, senao os helm releases ficam orfaos no state.
@@ -283,7 +294,7 @@ destroy() {
   vm_ip=$(cd "$OCI_UNIT_DIR/applications/compute/vm" && get_vm_ip) || true
   if [ -n "${vm_ip:-}" ]; then
     echo "==> Desinstalando K3s na VM ($vm_ip)..."
-    ssh -i "$SSH_KEY" -p "$SSH_PORT" -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
+    ssh -i "$SSH_KEY" -p "$SSH_PORT" $SSH_OPTS \
       "$SSH_USER@$vm_ip" "sudo /usr/local/bin/k3s-uninstall.sh" 2>/dev/null \
       || echo "K3s nao instalado ou ja removido."
   else
