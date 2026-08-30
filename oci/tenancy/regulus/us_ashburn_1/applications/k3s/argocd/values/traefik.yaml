@@ -32,6 +32,5 @@ providers:
     publishedService:
       enabled: true
 
-logs:
-  general:
-    level: INFO
+log:
+  level: INFO

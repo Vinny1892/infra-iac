@@ -6,7 +6,7 @@ exec > >(tee /var/log/k3s-install.log) 2>&1
 
 PUBLIC_IP="${1:?Usage: $0 <PUBLIC_IP> [DNS_NAME]}"
 DNS_NAME="${2:-}"
-K3S_VERSION="v1.33.1+k3s1"
+K3S_VERSION="v1.36.4+k3s1"
 
 echo "==> Installing Longhorn prerequisites"
 apt-get update -y

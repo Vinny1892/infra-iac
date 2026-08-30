@@ -9,7 +9,7 @@ include "provider" {
 locals {
   region_vars  = read_terragrunt_config(find_in_parent_folders("_locals.hcl"))
   k3s_dns_name = "k3s.vinny.dev.br"
-  k3s_version  = "v1.33.1+k3s1"
+  k3s_version  = "v1.36.4+k3s1"
 }
 
 dependency "vcn" {

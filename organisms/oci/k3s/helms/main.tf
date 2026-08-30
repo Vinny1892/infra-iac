@@ -6,7 +6,7 @@ resource "helm_release" "metallb" {
   name             = "metallb"
   repository       = "https://metallb.github.io/metallb"
   chart            = "metallb"
-  version          = "0.14.8"
+  version          = "0.16.1"
   namespace        = "metallb-system"
   create_namespace = true
   timeout          = 600
@@ -138,7 +138,7 @@ resource "helm_release" "cert_manager" {
   name       = "cert-manager"
   repository = "https://charts.jetstack.io"
   chart      = "cert-manager"
-  version    = "v1.19.4"
+  version    = "v1.21.1"
   namespace  = "cert-manager"
   timeout    = 300
   wait       = false
@@ -165,7 +165,7 @@ resource "helm_release" "longhorn" {
   name             = "longhorn"
   repository       = "https://charts.longhorn.io"
   chart            = "longhorn"
-  version          = "1.7.3"
+  version          = "1.12.1"
   namespace        = "longhorn-system"
   create_namespace = true
   timeout          = 600
@@ -197,7 +197,7 @@ resource "helm_release" "argocd" {
   name             = "argocd"
   repository       = "https://argoproj.github.io/argo-helm"
   chart            = "argo-cd"
-  version          = "9.4.5"
+  version          = "10.4.2"
   namespace        = "argocd"
   create_namespace = true
   timeout          = 600
