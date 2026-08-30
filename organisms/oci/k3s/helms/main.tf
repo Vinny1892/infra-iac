@@ -52,17 +52,14 @@ resource "null_resource" "metallb_config" {
         sleep 5
       done
 
-      # Wait for MetalLB webhook to be ready
-      for i in $(seq 1 60); do
-        if kubectl --kubeconfig "${var.kubeconfig_path}" -n metallb-system get endpoints metallb-webhook-service -o jsonpath='{.subsets[0].addresses[0].ip}' 2>/dev/null | grep -q .; then
-          echo "MetalLB webhook ready."
-          break
-        fi
-        echo "Waiting for MetalLB webhook... ($i/60)"
-        sleep 5
-      done
-
-      kubectl --kubeconfig "${var.kubeconfig_path}" apply -f - <<'EOF'
+      # Endpoint existir NAO significa webhook servindo. A versao anterior
+      # esperava o Service ter endereco e imprimia "MetalLB webhook ready" — e o
+      # apply logo abaixo tomava 502 do proxy do apiserver mesmo assim:
+      #   failed calling webhook "ipaddresspoolvalidationwebhook.metallb.io":
+      #   proxy error from 127.0.0.1:6443 while dialing 10.42.0.5:9443, code 502
+      # A condicao que importa e o apply ser aceito, entao e ele que se repete.
+      manifest=$(mktemp)
+      cat >"$manifest" <<'EOF'
 apiVersion: metallb.io/v1beta1
 kind: IPAddressPool
 metadata:
@@ -81,6 +78,20 @@ spec:
   ipAddressPools:
     - default-pool
 EOF
+
+      for i in $(seq 1 60); do
+        if kubectl --kubeconfig "${var.kubeconfig_path}" apply -f "$manifest"; then
+          echo "CRs do MetalLB aplicadas."
+          rm -f "$manifest"
+          exit 0
+        fi
+        echo "Webhook do MetalLB ainda nao aceita o apply ($i/60); aguardando 5s..."
+        sleep 5
+      done
+
+      rm -f "$manifest"
+      echo "ERRO: webhook do MetalLB nao aceitou as CRs apos 5 minutos."
+      exit 1
     SCRIPT
   }
 }

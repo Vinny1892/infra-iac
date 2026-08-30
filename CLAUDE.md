@@ -315,6 +315,20 @@ O script `pre-destroy.sh` é chamado automaticamente pelo `destroy` e limpa:
 
 12. **`pre-destroy.sh` com IP hardcoded** — IP antigo da VM ficou hardcoded no script. Fix: obter IP dinamicamente via `terragrunt output -raw instance_public_ip` com fallback se VM não existir.
 
+13. **Plugin `Compute Instance Run Command` inexistente** — `configure_regulus_host` esperava o plugin ficar `RUNNING`, mas a API responde `400 Plugin ... not present for instance`. O erro era engolido por `2>/dev/null || true` e o laço exibia "status indisponivel" por 60 tentativas. Fix: configurar o host por SSH (o Terraform já injeta `ssh_authorized_keys`), eliminando a dependência do agente.
+
+14. **Host key mudando no IP reservado** — a VM é recriada sobre o mesmo IP, então a host key muda a cada deploy e a entrada antiga em `known_hosts` atrapalha. Fix: `SSH_OPTS` central com `UserKnownHostsFile=/dev/null`, usado pelas quatro conexões SSH do script.
+
+15. **Corrida pelo lock do apt no primeiro boot** — `apt-get update` falhava com `Could not get lock /var/lib/apt/lists/lock` e o `set -euo pipefail` derrubava o `user_data` antes de instalar o K3s; a VM subia `RUNNING` **sem cluster**. Quem segura o lock **não é** o `apt-daily`: é o snap do Oracle Cloud Agent (`snap_daemon ... COMMAND=/bin/apt update` no journal). `DPkg::Lock::Timeout` não cobre o lock de `/var/lib/apt/lists`. Fix: `apt_retry()` repetindo cada comando até o lock liberar.
+
+16. **Destroy que não apagava nada** — `delete applications --all` expirava (finalizer de cascata do ArgoCD, sendo o próprio ArgoCD uma das Applications), o erro era engolido, os workloads seguiam rodando, os pods seguravam os PVCs por `pvc-protection`, e o Longhorn nunca recebia ordem de apagar os volumes. Fix: remover o finalizer antes do delete e derrubar os workloads explicitamente, preservando `longhorn-system` e `kube-system`. Pre-destroy caiu de 16m57s para 5m58s.
+
+17. **Substituição de comando sob `pipefail`** — `x=$(kubectl ... | sort -u)` propaga a falha do kubectl quando não há cluster; a atribuição falha e o `set -e` mata o script. Fix: `|| true`, como no resto do arquivo. Caminho só exposto ao destruir um cluster inexistente.
+
+**Versão de chart: seed e ArgoCD sempre em par.** Cada chart é declarado em dois lugares — o seed Terraform (`organisms/oci/k3s/helms/main.tf`) e a Application do ArgoCD (`argocd/apps/*.yaml`). Se divergirem, o `selfHeal` reverte o seed no primeiro sync e a versão "volta sozinha" depois de um apply aparentemente bem-sucedido. Antes de commitar um bump, renderize com os values reais: `helm template test <chart> --repo <url> --version <v> -f argocd/values/<chart>.yaml` — foi assim que apareceu a remoção de `logs.general.level` no Traefik 41.
+
+**Nunca mascarar falha com mensagem tranquilizadora.** `comando 2>/dev/null || echo "..."` converte falha em sucesso aparente e foi o que escondeu três dos erros acima — o script anunciava "No ArgoCD apps found" com 14 Applications vivas. Um `|| echo` só é aceitável quando a mensagem distingue os casos; se o comando pode falhar por mais de um motivo, o erro deve subir.
+
 **Metodologia de diagnóstico:**
 - Sempre começar pelos logs: `kubectl logs deploy/<componente>` para erros de aplicação
 - Para Terraform/Terragrunt: ler o stderr completo, não só as últimas linhas — o erro real costuma estar no meio
@@ -322,6 +336,16 @@ O script `pre-destroy.sh` é chamado automaticamente pelo `destroy` e limpa:
 - Para DNS: `kubectl get ingress -A` (verificar se IP está no status) → `kubectl logs deploy/external-dns -n external-dns` → `nslookup <domain>`
 - Para tráfego: verificar a cadeia completa: Cliente → Cloudflare proxy → hostPort (80/443) → Traefik → Service → Pod
 - **Nunca assumir** que algo funciona porque "deveria funcionar" — verificar cada camada
+
+**Armadilhas fora do deploy.sh:**
+
+- **Registro DNS órfão bloqueia o external-dns.** Um `CNAME` remanescente (ex.: apontando para um Cloudflare Tunnel morto) impede a criação do `A` no mesmo nome, e o external-dns **não o remove** se o TXT de posse tiver outro `owner` — ele roda com `txtOwnerId: k3s-oci` e ignora o que não é dele. Sintoma: HTTP 530 do Cloudflare com todos os pods saudáveis. Diagnóstico: comparar os registros do host quebrado com os de um host que funciona. Fix: apagar o CNAME órfão; o external-dns cria o A em segundos.
+
+- **Senha do Grafana não sobrevive a sync.** O chart gera `randAlphaNum 40` a cada render e o banco vive num PVC — o `GF_SECURITY_ADMIN_PASSWORD` só vale na primeira inicialização. A cada sync do ArgoCD o secret passa a anunciar uma senha que o banco não conhece. Paliativo: `grafana cli --homepath="$GF_PATHS_HOME" --config="$GF_PATHS_CONFIG" admin reset-admin-password "$GF_SECURITY_ADMIN_PASSWORD"` dentro do pod. Solução: `admin.existingSecret` apontando para secret estável vindo do 1Password.
+
+- **HTTP 401 no Grafana pode ser bloqueio, não senha errada.** Após algumas tentativas falhas o Grafana bloqueia o usuário temporariamente (`too many consecutive incorrect login attempts`). O código HTTP é idêntico ao de senha inválida — só o log do servidor distingue. Sempre conferir `kubectl logs deploy/vmks-grafana -n monitoring` antes de concluir.
+
+> Detalhamento completo do ciclo destroy/deploy, cadeias causais e medições: [`docs/REGULUS-CICLO-DE-VIDA.md`](docs/REGULUS-CICLO-DE-VIDA.md)
 
 ### ArgoCD — Arquitetura e Self-Management
 
