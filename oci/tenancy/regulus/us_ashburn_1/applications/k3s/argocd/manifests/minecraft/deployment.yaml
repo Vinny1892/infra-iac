@@ -32,7 +32,8 @@ spec:
             - name: MEMORY
               value: 6G
             - name: ONLINE_MODE
-              value: "TRUE"
+              # Aceita contas originais e clientes sem autenticacao Mojang.
+              value: "FALSE"
             - name: ENABLE_RCON
               value: "TRUE"
             - name: RCON_PASSWORD
