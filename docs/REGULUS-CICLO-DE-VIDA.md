@@ -6,7 +6,7 @@ description: "Como destroy e deploy realmente funcionam no cluster Regulus, os d
 # Regulus — Ciclo de Vida do Cluster OCI K3s
 
 Este documento descreve o caminho real de `deploy.sh destroy` e `deploy.sh deploy`
-no cluster OCI Regulus, e registra seis defeitos encontrados ao validar esse
+no cluster OCI Regulus, e registra sete defeitos encontrados ao validar esse
 caminho de ponta a ponta em 30/08/2026.
 
 O foco é o **porquê** de cada etapa existir. Várias delas parecem redundantes até
@@ -209,7 +209,7 @@ espera cega torcendo para a limpeza terminar.
 
 ---
 
-## Os seis defeitos
+## Os sete defeitos
 
 ### Defeito 1 — Plugin de Run Command que não existe
 
@@ -324,11 +324,43 @@ que se quer que funcione, em vez de inferir prontidão por um sinal correlato.
 `CLAUDE.md` e funcionou várias vezes — a condição correlata costuma valer. Só
 falha quando o pod registra endpoint e demora mais alguns segundos para servir.
 
+### Defeito 7 — CRD e CR no mesmo sync
+
+**Sintoma.** Cluster recriado sobe **sem observabilidade nenhuma** e nada alerta.
+O Application `victoria-metrics` fica `Progressing` indefinidamente — 51 minutos
+num caso real — e `VMSingle`, `VMAgent`, `VLSingle` e `VLAgent` simplesmente nao
+existem. Os pods de metrica e log nao aparecem, mas nenhum erro sobe: a falha so
+existe no log do `argocd-application-controller`.
+
+```
+SyncFailed: resource mapping not found for name: "vmks"
+no matches for kind "VMAgent" in version "operator.victoriametrics.com/v1beta1"
+ensure CRDs are installed first
+```
+
+**Causa.** O app entrega as CRDs do operator e as CRs que dependem delas no
+**mesmo sync**. O ArgoCD aplica as CRDs e, antes de o cache de discovery do
+apiserver conhecer os tipos novos, tenta aplicar as CRs. As CRDs terminam
+`Established=True` e a API passa a responder por elas — mas as CRs ja falharam e
+nao sao retentadas.
+
+**Correção.** `SkipDryRunOnMissingResource=true` evita a falha no dry-run por
+tipo ainda desconhecido, e uma politica de `retry` cobre o caso de a corrida
+ocorrer mesmo assim: na segunda tentativa as CRDs ja estao estabelecidas
+(`oci/tenancy/regulus/us_ashburn_1/applications/k3s/argocd/apps/victoria-metrics.yaml:38`
+e `:48`). Destravada a operacao presa, as quatro CRs foram criadas em 15s.
+
+**Por que enganou o diagnostico.** Tres hipoteses plausiveis foram descartadas
+antes de chegar na causa: semantica do health check dos objetos de scrape,
+deadlock entre `VMAgent` e `VMNodeScrape`, e operacao de sync simplesmente
+pendurada. O que resolveu foi ler o log do controller, onde a mensagem real
+estava — nenhum dos estados visiveis via `kubectl get application` a mostrava.
+
 ---
 
 ## O anti-padrão transversal
 
-Três dos seis defeitos foram mascarados pela mesma construção:
+Três dos sete defeitos foram mascarados pela mesma construção:
 
 ```bash
 comando 2>/dev/null || echo "mensagem tranquilizadora"
