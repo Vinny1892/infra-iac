@@ -60,8 +60,6 @@ inputs = {
   data_volume_display_name  = "vm-regulus-longhorn"
   data_volume_vpus_per_gb   = 10
   data_volume_device        = "/dev/oracleoci/oraclevdb"
-  enable_run_command_plugin = true
-
   reserved_public_ip_id      = dependency.reserved_ip.outputs.public_ip_id
   reserved_public_ip_address = dependency.reserved_ip.outputs.public_ip_address
 

@@ -11,10 +11,49 @@ SSH_PORT="22"
 SSH_USER="ubuntu"
 KUBECONFIG_PATH="${K3S_OCI_KUBECONFIG:-$HOME/.kube/k3s-oci.yaml}"
 TEMP_SSH_KEY=""
+TEMP_SSH_PUBLIC_KEY=""
+RECOVERY_INSTANCE_ID=""
+RECOVERY_VOLUME_ATTACHMENT_ID=""
+RECOVERY_BOOT_VOLUME_ID=""
+REGULUS_INSTANCE_ID=""
+REGULUS_WAS_STOPPED=false
 
 cleanup() {
+  # A recuperacao da chave usa uma VM efemera. Se qualquer etapa falhar depois
+  # de tirar o boot volume da Regulus, devolva-o antes de remover a VM auxiliar.
+  if [ -n "$RECOVERY_VOLUME_ATTACHMENT_ID" ]; then
+    oci compute volume-attachment detach \
+      --volume-attachment-id "$RECOVERY_VOLUME_ATTACHMENT_ID" --force \
+      --wait-for-state DETACHED >/dev/null 2>&1 || true
+    RECOVERY_VOLUME_ATTACHMENT_ID=""
+  fi
+  if [ -n "$RECOVERY_BOOT_VOLUME_ID" ] && [ -n "$REGULUS_INSTANCE_ID" ]; then
+    local attached_instance
+    attached_instance=$(oci compute boot-volume-attachment list \
+      --availability-domain "$(oci compute instance get --instance-id "$REGULUS_INSTANCE_ID" --query 'data."availability-domain"' --raw-output 2>/dev/null)" \
+      --compartment-id "$(oci compute instance get --instance-id "$REGULUS_INSTANCE_ID" --query 'data."compartment-id"' --raw-output 2>/dev/null)" \
+      --boot-volume-id "$RECOVERY_BOOT_VOLUME_ID" \
+      --query 'data[0]."instance-id"' --raw-output 2>/dev/null || true)
+    if [ -z "$attached_instance" ] || [ "$attached_instance" = "None" ]; then
+      oci compute boot-volume-attachment attach \
+        --instance-id "$REGULUS_INSTANCE_ID" \
+        --boot-volume-id "$RECOVERY_BOOT_VOLUME_ID" \
+        --wait-for-state ATTACHED >/dev/null 2>&1 || true
+    fi
+    if [ "$REGULUS_WAS_STOPPED" = true ]; then
+      oci compute instance action --instance-id "$REGULUS_INSTANCE_ID" \
+        --action START --wait-for-state RUNNING >/dev/null 2>&1 || true
+    fi
+  fi
+  if [ -n "$RECOVERY_INSTANCE_ID" ]; then
+    oci compute instance terminate --instance-id "$RECOVERY_INSTANCE_ID" \
+      --preserve-boot-volume false --force --wait-for-state TERMINATED >/dev/null 2>&1 || true
+  fi
   if [ -n "$TEMP_SSH_KEY" ] && [ -f "$TEMP_SSH_KEY" ]; then
     rm -f "$TEMP_SSH_KEY"
+  fi
+  if [ -n "$TEMP_SSH_PUBLIC_KEY" ] && [ -f "$TEMP_SSH_PUBLIC_KEY" ]; then
+    rm -f "$TEMP_SSH_PUBLIC_KEY"
   fi
 }
 
@@ -32,6 +71,8 @@ prepare_ssh_key() {
   TEMP_SSH_KEY=$(mktemp /tmp/regulus-ssh-key.XXXXXX)
   op read --out-file "$TEMP_SSH_KEY" --file-mode 0600 --force "$SSH_KEY_REF" >/dev/null
   SSH_KEY="$TEMP_SSH_KEY"
+  TEMP_SSH_PUBLIC_KEY=$(mktemp /tmp/regulus-ssh-public-key.XXXXXX)
+  op read --out-file "$TEMP_SSH_PUBLIC_KEY" --file-mode 0600 --force "$SSH_PUBLIC_KEY_REF" >/dev/null
 }
 
 get_vm_ip() {
@@ -50,71 +91,112 @@ provision_vm() {
   terragrunt apply --auto-approve
 }
 
-configure_regulus_host() {
-  local instance_id
-  instance_id=$(cd "$OCI_UNIT_DIR/applications/compute/vm" && terragrunt output -raw instance_id)
+recover_regulus_ssh_key() {
+  REGULUS_INSTANCE_ID=$(cd "$OCI_UNIT_DIR/applications/compute/vm" && terragrunt output -raw instance_id)
+  local instance_json availability_domain compartment_id subnet_id image_id recovery_ip
+  instance_json=$(oci compute instance get --instance-id "$REGULUS_INSTANCE_ID")
+  availability_domain=$(jq -r '.data["availability-domain"]' <<<"$instance_json")
+  compartment_id=$(jq -r '.data["compartment-id"]' <<<"$instance_json")
+  subnet_id=$(cd "$OCI_UNIT_DIR/applications/compute/vm" && terragrunt output -raw primary_subnet_id)
+  image_id=$(oci compute image list \
+    --compartment-id "$compartment_id" \
+    --operating-system "Canonical Ubuntu" \
+    --operating-system-version "24.04" \
+    --shape "VM.Standard.E2.1.Micro" \
+    --sort-by TIMECREATED --sort-order DESC --all \
+    --query 'data[0].id' --raw-output)
 
-  echo "==> Aguardando o plugin Compute Instance Run Command..."
-  local plugin_status=""
-  for i in $(seq 1 60); do
-    plugin_status=$(oci instance-agent plugin list \
-      --compartment-id "ocid1.tenancy.oc1..aaaaaaaa67vhrp637voglpe2gux3tnf2adhohpxlild2hepev4friacmlcwq" \
-      --instanceagent-id "$instance_id" \
-      --name "Compute Instance Run Command" \
-      --query 'data[0].status' --raw-output 2>/dev/null || true)
-    if [ "$plugin_status" = "RUNNING" ]; then
+  echo "==> Criando VM efemera para recuperar a chave SSH da Regulus..."
+  RECOVERY_INSTANCE_ID=$(oci compute instance launch \
+    --availability-domain "$availability_domain" \
+    --compartment-id "$compartment_id" \
+    --subnet-id "$subnet_id" \
+    --shape "VM.Standard.E2.1.Micro" \
+    --image-id "$image_id" \
+    --display-name "regulus-ssh-recovery" \
+    --assign-public-ip true \
+    --ssh-authorized-keys-file "$TEMP_SSH_PUBLIC_KEY" \
+    --wait-for-state RUNNING \
+    --query 'data.id' --raw-output)
+  recovery_ip=$(oci compute instance list-vnics --instance-id "$RECOVERY_INSTANCE_ID" \
+    --query 'data[0]."public-ip"' --raw-output)
+
+  echo "==> Aguardando SSH da VM de recuperacao..."
+  for i in $(seq 1 40); do
+    if ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
+      "ubuntu@$recovery_ip" true 2>/dev/null; then
       break
     fi
-    echo "  Tentativa $i/60 — status ${plugin_status:-indisponivel}; aguardando 10s..."
+    if [ "$i" -eq 40 ]; then
+      echo "ERROR: VM de recuperacao nao aceitou SSH."
+      exit 1
+    fi
     sleep 10
   done
 
-  if [ "$plugin_status" != "RUNNING" ]; then
-    echo "ERROR: plugin Compute Instance Run Command nao ficou RUNNING."
-    exit 1
-  fi
+  local boot_attachment_json boot_attachment_id
+  boot_attachment_json=$(oci compute boot-volume-attachment list \
+    --availability-domain "$availability_domain" \
+    --compartment-id "$compartment_id" \
+    --instance-id "$REGULUS_INSTANCE_ID" \
+    --query 'data[0]')
+  boot_attachment_id=$(jq -r '."boot-volume-attachment-id" // .id' <<<"$boot_attachment_json")
+  RECOVERY_BOOT_VOLUME_ID=$(jq -r '."boot-volume-id"' <<<"$boot_attachment_json")
 
-  local script_b64 public_key_b64 remote_command target_json content_json command_id
-  script_b64=$(base64 -w0 "$SCRIPT_DIR/scripts/configure-regulus-host.sh")
-  public_key_b64=$(op read "$SSH_PUBLIC_KEY_REF" | base64 -w0)
-  remote_command="printf '%s' '$script_b64' | base64 --decode | REGULUS_SSH_PUBLIC_KEY_B64='$public_key_b64' bash"
-  target_json=$(jq -cn --arg id "$instance_id" '{instanceId: $id}')
-  content_json=$(jq -cn --arg command "$remote_command" \
-    '{source: {sourceType: "TEXT", text: $command}, output: {outputType: "TEXT"}}')
-
-  echo "==> Configurando chave SSH e volume dedicado do Longhorn..."
-  command_id=$(oci instance-agent command create \
-    --compartment-id "ocid1.tenancy.oc1..aaaaaaaa67vhrp637voglpe2gux3tnf2adhohpxlild2hepev4friacmlcwq" \
-    --target "$target_json" \
-    --content "$content_json" \
-    --display-name "configure-regulus-host" \
-    --timeout-in-seconds 900 \
+  echo "==> Parando a Regulus e anexando seu boot volume na VM de recuperacao..."
+  oci compute instance action --instance-id "$REGULUS_INSTANCE_ID" \
+    --action SOFTSTOP --wait-for-state STOPPED >/dev/null
+  REGULUS_WAS_STOPPED=true
+  oci compute boot-volume-attachment detach \
+    --boot-volume-attachment-id "$boot_attachment_id" --force \
+    --wait-for-state DETACHED >/dev/null
+  RECOVERY_VOLUME_ATTACHMENT_ID=$(oci compute volume-attachment attach \
+    --instance-id "$RECOVERY_INSTANCE_ID" \
+    --volume-id "$RECOVERY_BOOT_VOLUME_ID" \
+    --type paravirtualized \
+    --device "/dev/oracleoci/oraclevdb" \
+    --display-name "regulus-boot-recovery" \
+    --wait-for-state ATTACHED \
     --query 'data.id' --raw-output)
 
-  local status=""
-  for i in $(seq 1 100); do
-    status=$(oci instance-agent command-execution get \
-      --instance-id "$instance_id" \
-      --command-id "$command_id" \
-      --query 'data.status' --raw-output)
-    case "$status" in
-      SUCCEEDED)
-        echo "Host Regulus configurado."
-        return 0
-        ;;
-      FAILED|TIMED_OUT|CANCELED)
-        echo "ERROR: Run Command terminou com status $status."
-        oci instance-agent command-execution get \
-          --instance-id "$instance_id" --command-id "$command_id"
-        exit 1
-        ;;
-    esac
-    echo "  Run Command $status ($i/100); aguardando 10s..."
-    sleep 10
-  done
+  local recovery_script_b64 public_key_b64
+  recovery_script_b64=$(base64 -w0 "$SCRIPT_DIR/scripts/recover-regulus-ssh.sh")
+  public_key_b64=$(base64 -w0 "$TEMP_SSH_PUBLIC_KEY")
+  ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no "ubuntu@$recovery_ip" \
+    "printf '%s' '$recovery_script_b64' | base64 --decode | sudo REGULUS_SSH_PUBLIC_KEY_B64='$public_key_b64' bash"
 
-  echo "ERROR: Run Command nao terminou dentro do prazo."
-  exit 1
+  echo "==> Devolvendo o boot volume e iniciando a Regulus..."
+  oci compute volume-attachment detach \
+    --volume-attachment-id "$RECOVERY_VOLUME_ATTACHMENT_ID" --force \
+    --wait-for-state DETACHED >/dev/null
+  RECOVERY_VOLUME_ATTACHMENT_ID=""
+  oci compute boot-volume-attachment attach \
+    --instance-id "$REGULUS_INSTANCE_ID" \
+    --boot-volume-id "$RECOVERY_BOOT_VOLUME_ID" \
+    --wait-for-state ATTACHED >/dev/null
+  RECOVERY_BOOT_VOLUME_ID=""
+  oci compute instance action --instance-id "$REGULUS_INSTANCE_ID" \
+    --action START --wait-for-state RUNNING >/dev/null
+  REGULUS_WAS_STOPPED=false
+  oci compute instance terminate --instance-id "$RECOVERY_INSTANCE_ID" \
+    --preserve-boot-volume false --force --wait-for-state TERMINATED >/dev/null
+  RECOVERY_INSTANCE_ID=""
+}
+
+configure_regulus_host() {
+  local vm_ip public_key_b64 script_b64
+  vm_ip=$(cd "$OCI_UNIT_DIR/applications/compute/vm" && get_vm_ip)
+
+  if ! ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
+    "$SSH_USER@$vm_ip" true 2>/dev/null; then
+    recover_regulus_ssh_key
+  fi
+
+  echo "==> Configurando chave SSH e volume dedicado do Longhorn..."
+  script_b64=$(base64 -w0 "$SCRIPT_DIR/scripts/configure-regulus-host.sh")
+  public_key_b64=$(base64 -w0 "$TEMP_SSH_PUBLIC_KEY")
+  ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no "$SSH_USER@$vm_ip" \
+    "printf '%s' '$script_b64' | base64 --decode | sudo REGULUS_SSH_PUBLIC_KEY_B64='$public_key_b64' bash"
 }
 
 wait_for_k3s() {
@@ -261,8 +343,8 @@ case "$MODE" in
   deploy)
     preflight_check
     provision_vm
-    configure_regulus_host
     prepare_ssh_key
+    configure_regulus_host
     VM_IP=$(wait_for_k3s)
     fetch_kubeconfig "$VM_IP"
     deploy_helms
