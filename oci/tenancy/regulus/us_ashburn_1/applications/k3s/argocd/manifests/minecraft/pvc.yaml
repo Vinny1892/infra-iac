@@ -8,10 +8,11 @@ metadata:
 spec:
   accessModes:
     - ReadWriteOnce
-  storageClassName: longhorn
+  # O deploy cria esta StorageClass com fromBackup apontando para o backup
+  # remoto mais recente antes que o ArgoCD sincronize o workload.
+  storageClassName: minecraft-data
   resources:
     requests:
-      # Alem da reserva do proprio Longhorn, ele mantem 25% do disco livre para
-      # snapshots/rebuild. Com o PVC do Hermes, 15 Gi e o maior tamanho que
-      # preserva margem segura neste no de 50 GB.
+      # Mantem o tamanho original do volume para que o restore preserve o mundo
+      # e ainda deixa bastante margem no volume dedicado de 100 GB do Longhorn.
       storage: 15Gi

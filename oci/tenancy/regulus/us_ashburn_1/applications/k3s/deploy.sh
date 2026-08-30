@@ -199,6 +199,96 @@ bootstrap_backup_secrets() {
   bash "$SCRIPT_DIR/bootstrap-longhorn-backup.sh"
 }
 
+restore_minecraft_data() {
+  local kubectl_cmd=(kubectl --kubeconfig "$KUBECONFIG_PATH")
+  local backup_target_manifest="$SCRIPT_DIR/argocd/manifests/longhorn-backup-config/backup-target.yaml"
+  local pvc_manifest="$SCRIPT_DIR/argocd/manifests/minecraft/pvc.yaml"
+
+  if "${kubectl_cmd[@]}" -n minecraft get pvc minecraft-data >/dev/null 2>&1; then
+    echo "==> PVC do Minecraft ja existe; restauracao nao e necessaria."
+    return 0
+  fi
+
+  echo "==> Sincronizando o catalogo remoto de backups do Longhorn..."
+  "${kubectl_cmd[@]}" apply -f "$backup_target_manifest"
+
+  local target_available="false"
+  for i in $(seq 1 60); do
+    target_available=$("${kubectl_cmd[@]}" -n longhorn-system get backuptarget default \
+      -o jsonpath='{.status.available}' 2>/dev/null || true)
+    if [ "$target_available" = "true" ]; then
+      break
+    fi
+    echo "  BackupTarget ainda indisponivel ($i/60); aguardando 10s..."
+    sleep 10
+  done
+  if [ "$target_available" != "true" ]; then
+    echo "ERROR: BackupTarget do Longhorn nao ficou disponivel; PVC nao sera criado vazio."
+    exit 1
+  fi
+
+  local backup_url=""
+  for i in $(seq 1 60); do
+    backup_url=$("${kubectl_cmd[@]}" -n longhorn-system get backups.longhorn.io -o json 2>/dev/null \
+      | jq -r '[.items[]
+          | select(.status.state == "Completed")
+          | select(((.status.labels.KubernetesStatus // .spec.labels.KubernetesStatus // "{}") | fromjson? // {})
+            | .namespace == "minecraft" and .pvcName == "minecraft-data")]
+        | sort_by(.status.backupCreatedAt // .metadata.creationTimestamp)
+        | last
+        | .status.url // empty' || true)
+    if [ -n "$backup_url" ]; then
+      break
+    fi
+    echo "  Backup do Minecraft ainda nao apareceu no catalogo ($i/60); aguardando 10s..."
+    sleep 10
+  done
+  if [ -z "$backup_url" ]; then
+    echo "ERROR: nenhum backup completo do PVC minecraft/minecraft-data foi encontrado."
+    echo "  Recusando criar um volume vazio durante uma recriacao do cluster."
+    exit 1
+  fi
+
+  echo "==> Criando StorageClass de restauracao e PVC do Minecraft..."
+  jq -n --arg from_backup "$backup_url" '{
+    apiVersion: "storage.k8s.io/v1",
+    kind: "StorageClass",
+    metadata: {name: "minecraft-data"},
+    provisioner: "driver.longhorn.io",
+    allowVolumeExpansion: true,
+    reclaimPolicy: "Delete",
+    volumeBindingMode: "Immediate",
+    parameters: {
+      numberOfReplicas: "1",
+      staleReplicaTimeout: "30",
+      fromBackup: $from_backup,
+      fsType: "ext4"
+    }
+  }' | "${kubectl_cmd[@]}" apply -f -
+  "${kubectl_cmd[@]}" apply -f "$pvc_manifest"
+  "${kubectl_cmd[@]}" -n minecraft wait --for=jsonpath='{.status.phase}'=Bound \
+    pvc/minecraft-data --timeout=45m
+
+  local volume_name restore_required
+  volume_name=$("${kubectl_cmd[@]}" -n minecraft get pvc minecraft-data \
+    -o jsonpath='{.spec.volumeName}')
+  volume_name=$("${kubectl_cmd[@]}" get pv "$volume_name" \
+    -o jsonpath='{.spec.csi.volumeHandle}')
+  for i in $(seq 1 180); do
+    restore_required=$("${kubectl_cmd[@]}" -n longhorn-system get volume "$volume_name" \
+      -o jsonpath='{.status.restoreRequired}' 2>/dev/null || true)
+    if [ "$restore_required" = "false" ]; then
+      echo "Backup do Minecraft restaurado no volume $volume_name."
+      return 0
+    fi
+    echo "  Restauracao Longhorn em andamento ($i/180); aguardando 10s..."
+    sleep 10
+  done
+
+  echo "ERROR: restauracao do Minecraft nao terminou dentro de 30 minutos."
+  exit 1
+}
+
 deploy_root_app() {
   # O root app precisa do repo-server de pe para gerar manifests. Aplicado antes
   # disso, o ArgoCD grava um ComparisonError ("connection refused" na 8081) e a
@@ -267,6 +357,7 @@ case "$MODE" in
     fetch_kubeconfig "$VM_IP"
     deploy_helms
     bootstrap_backup_secrets
+    restore_minecraft_data
     deploy_root_app
     verify
     ;;
@@ -274,6 +365,7 @@ case "$MODE" in
     preflight_check
     deploy_helms
     bootstrap_backup_secrets
+    restore_minecraft_data
     deploy_root_app
     ;;
   verify)
