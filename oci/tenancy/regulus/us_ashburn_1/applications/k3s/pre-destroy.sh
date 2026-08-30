@@ -90,6 +90,30 @@ delete_argocd_applications() {
   fi
 }
 
+delete_operator_workload_crs() {
+  # Remover o finalizer das Applications (ver delete_argocd_applications) destrava
+  # o delete, mas tem um custo: o ArgoCD deixa de cascatear a remocao dos recursos
+  # que geria. Para Deployment comum isso nao importa — delete_pvc_workloads os
+  # apaga direto. Para carga gerida por operator, importa muito: a CR sobrevive,
+  # o operator reconcilia e RECRIA o Deployment que acabou de ser apagado, e o pod
+  # novo volta a segurar o PVC.
+  #
+  # Observado com o VictoriaLogs: o vlsingle renascia, o delete de PVCs expirava e
+  # os volumes do Longhorn nunca drenavam. A CR precisa morrer antes do workload.
+  local kinds="vlsingle vlagent vlcluster vmsingle vmagent vmcluster vmalert vmalertmanager"
+  local kind encontrou=0
+  for kind in $kinds; do
+    $KUBECTL get crd "${kind}s.operator.victoriametrics.com" >/dev/null 2>&1 || continue
+    if [ -n "$($KUBECTL get "$kind" -A --no-headers 2>/dev/null || true)" ]; then
+      echo "  removendo CRs do tipo $kind"
+      $KUBECTL delete "$kind" --all -A --timeout=60s >/dev/null 2>&1 || true
+      encontrou=1
+    fi
+  done
+  [ "$encontrou" -eq 0 ] && echo "  nenhuma CR de operator encontrada."
+  return 0
+}
+
 delete_pvc_workloads() {
   # Um PVC nao e removido enquanto algum pod o monta: o finalizer
   # kubernetes.io/pvc-protection o mantem em Terminating indefinidamente. Sem
@@ -189,6 +213,10 @@ delete_argocd_applications
 
 # O `sleep 30` que existia aqui era uma espera cega torcendo para o ArgoCD
 # terminar a limpeza. As esperas abaixo sao por condicao observavel.
+# Antes dos workloads: senao o operator recria o que for apagado.
+echo "==> Removendo CRs geridas por operator..."
+delete_operator_workload_crs
+
 delete_pvc_workloads
 
 echo "==> Deleting PVCs across all namespaces..."
