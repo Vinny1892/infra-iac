@@ -27,6 +27,22 @@ spec:
     automated:
       prune: true
       selfHeal: true
+    # Este app entrega CRDs e CRs do operator no MESMO sync. O ArgoCD aplica as
+    # CRDs e, em seguida, tenta aplicar VMSingle/VMAgent/VLSingle/VLAgent antes
+    # de o cache de discovery do apiserver conhecer os tipos novos:
+    #   resource mapping not found ... no matches for kind "VMAgent"
+    #   in version "operator.victoriametrics.com/v1beta1"
+    # Observado num deploy real: as CRDs ficaram Established, mas as CRs falharam
+    # e nunca subiram — vmsingle, vmagent e a stack de logs simplesmente nao
+    # existiam, com o app parado em Progressing.
+    retry:
+      limit: 5
+      backoff:
+        duration: 30s
+        factor: 2
+        maxDuration: 5m
     syncOptions:
       - CreateNamespace=true
       - ServerSideApply=true
+      # Evita que o dry-run falhe por tipo ainda desconhecido no mesmo sync.
+      - SkipDryRunOnMissingResource=true
