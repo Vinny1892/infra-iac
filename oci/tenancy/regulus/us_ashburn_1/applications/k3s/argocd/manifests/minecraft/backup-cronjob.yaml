@@ -47,9 +47,18 @@ spec:
                   }
                   trap cleanup EXIT INT TERM
 
-                  target_available="$(kubectl -n longhorn-system get backuptarget default -o jsonpath='{.status.available}')"
+                  # O controller pode levar alguns minutos para reconectar o
+                  # BackupTarget após um restart. Nao falhe o backup diario
+                  # imediatamente enquanto essa reconciliacao esta em curso.
+                  target_available=false
+                  for _ in $(seq 1 60); do
+                    target_available="$(kubectl -n longhorn-system get backuptarget default -o jsonpath='{.status.available}')"
+                    [ "$target_available" = "true" ] && break
+                    echo "Aguardando BackupTarget Longhorn (available=$target_available)..." >&2
+                    sleep 10
+                  done
                   if [ "$target_available" != "true" ]; then
-                    echo "BackupTarget Longhorn indisponivel (available=$target_available)" >&2
+                    echo "BackupTarget Longhorn indisponivel apos 10 minutos (available=$target_available)" >&2
                     exit 1
                   fi
                   rcon save-off

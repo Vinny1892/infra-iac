@@ -17,7 +17,8 @@ spec:
     spec:
       containers:
         - name: minecraft
-          image: itzg/minecraft-server:java21
+          # Paper 26.1+ requer Java 25.
+          image: itzg/minecraft-server:java25
           imagePullPolicy: IfNotPresent
           env:
             - name: EULA
@@ -27,7 +28,7 @@ spec:
             # Pinado para evitar uma atualizacao inesperada do mundo em um
             # restart. A atualizacao e uma mudanca deliberada de Git.
             - name: VERSION
-              value: 1.21.8
+              value: "26.2"
             - name: MEMORY
               value: 6G
             - name: ONLINE_MODE

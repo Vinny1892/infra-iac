@@ -1,6 +1,14 @@
 deployment:
   kind: DaemonSet
 
+# A DaemonSet using host ports cannot surge on a single-node cluster: the new
+# pod would contend with the old one for those ports and remain Pending.
+updateStrategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxUnavailable: 1
+    maxSurge: 0
+
 service:
   type: LoadBalancer
 
