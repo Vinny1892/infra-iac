@@ -11,6 +11,7 @@ SSH_PORT="22"
 SSH_USER="ubuntu"
 KUBECONFIG_PATH="${K3S_OCI_KUBECONFIG:-$HOME/.kube/k3s-oci.yaml}"
 TEMP_SSH_KEY=""
+SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=15"
 
 cleanup() {
   if [ -n "$TEMP_SSH_KEY" ] && [ -f "$TEMP_SSH_KEY" ]; then
@@ -51,76 +52,25 @@ provision_vm() {
 }
 
 configure_regulus_host() {
-  local instance_id
-  instance_id=$(cd "$OCI_UNIT_DIR/applications/compute/vm" && terragrunt output -raw instance_id)
+  local vm_ip="$1"
+  local script_b64 public_key_b64
 
-  echo "==> Aguardando o plugin Compute Instance Run Command..."
-  local plugin_status=""
-  for i in $(seq 1 60); do
-    plugin_status=$(oci instance-agent plugin list \
-      --compartment-id "ocid1.tenancy.oc1..aaaaaaaa67vhrp637voglpe2gux3tnf2adhohpxlild2hepev4friacmlcwq" \
-      --instanceagent-id "$instance_id" \
-      --name "Compute Instance Run Command" \
-      --query 'data[0].status' --raw-output 2>/dev/null || true)
-    if [ "$plugin_status" = "RUNNING" ]; then
-      break
-    fi
-    echo "  Tentativa $i/60 — status ${plugin_status:-indisponivel}; aguardando 10s..."
-    sleep 10
-  done
-
-  if [ "$plugin_status" != "RUNNING" ]; then
-    echo "ERROR: plugin Compute Instance Run Command nao ficou RUNNING."
-    exit 1
-  fi
-
-  local script_b64 public_key_b64 remote_command target_json content_json command_id
+  # O plugin "Compute Instance Run Command" nao e exposto nesta instancia
+  # (a API responde "not present"), entao a configuracao vai por SSH — que ja
+  # funciona porque o Terraform injeta ssh_authorized_keys na criacao da VM.
   script_b64=$(base64 -w0 "$SCRIPT_DIR/scripts/configure-regulus-host.sh")
   public_key_b64=$(op read "$SSH_PUBLIC_KEY_REF" | base64 -w0)
-  remote_command="printf '%s' '$script_b64' | base64 --decode | REGULUS_SSH_PUBLIC_KEY_B64='$public_key_b64' bash"
-  target_json=$(jq -cn --arg id "$instance_id" '{instanceId: $id}')
-  content_json=$(jq -cn --arg command "$remote_command" \
-    '{source: {sourceType: "TEXT", text: $command}, output: {outputType: "TEXT"}}')
 
   echo "==> Configurando chave SSH e volume dedicado do Longhorn..."
-  command_id=$(oci instance-agent command create \
-    --compartment-id "ocid1.tenancy.oc1..aaaaaaaa67vhrp637voglpe2gux3tnf2adhohpxlild2hepev4friacmlcwq" \
-    --target "$target_json" \
-    --content "$content_json" \
-    --display-name "configure-regulus-host" \
-    --timeout-in-seconds 900 \
-    --query 'data.id' --raw-output)
-
-  local status=""
-  for i in $(seq 1 100); do
-    status=$(oci instance-agent command-execution get \
-      --instance-id "$instance_id" \
-      --command-id "$command_id" \
-      --query 'data.status' --raw-output)
-    case "$status" in
-      SUCCEEDED)
-        echo "Host Regulus configurado."
-        return 0
-        ;;
-      FAILED|TIMED_OUT|CANCELED)
-        echo "ERROR: Run Command terminou com status $status."
-        oci instance-agent command-execution get \
-          --instance-id "$instance_id" --command-id "$command_id"
-        exit 1
-        ;;
-    esac
-    echo "  Run Command $status ($i/100); aguardando 10s..."
-    sleep 10
-  done
-
-  echo "ERROR: Run Command nao terminou dentro do prazo."
-  exit 1
+  ssh -i "$SSH_KEY" -p "$SSH_PORT" $SSH_OPTS "$SSH_USER@$vm_ip" \
+    "printf '%s' '$script_b64' | base64 --decode | sudo REGULUS_SSH_PUBLIC_KEY_B64='$public_key_b64' bash"
+  echo "Host Regulus configurado."
 }
 
 wait_for_k3s() {
   local vm_ip
   vm_ip=$(cd "$OCI_UNIT_DIR/applications/compute/vm" && get_vm_ip)
-  local SSH="ssh -i $SSH_KEY -p $SSH_PORT -o StrictHostKeyChecking=no $SSH_USER@$vm_ip"
+  local SSH="ssh -i $SSH_KEY -p $SSH_PORT $SSH_OPTS $SSH_USER@$vm_ip"
 
   echo "==> VM IP: $vm_ip — aguardando K3s ficar Ready (cloud-init)..." >&2
   local retries=60
@@ -145,7 +95,7 @@ fetch_kubeconfig() {
   local retries=20
   local success=false
   for i in $(seq 1 $retries); do
-    if ssh -i "$SSH_KEY" -p "$SSH_PORT" -o StrictHostKeyChecking=no -o ConnectTimeout=10 "$SSH_USER@$vm_ip" "cat /etc/rancher/k3s/k3s.yaml" > /tmp/k3s-oci-raw.yaml 2>/dev/null; then
+    if ssh -i "$SSH_KEY" -p "$SSH_PORT" $SSH_OPTS "$SSH_USER@$vm_ip" "cat /etc/rancher/k3s/k3s.yaml" > /tmp/k3s-oci-raw.yaml 2>/dev/null; then
       success=true
       break
     fi
@@ -351,9 +301,9 @@ case "$MODE" in
   deploy)
     preflight_check
     provision_vm
-    configure_regulus_host
     prepare_ssh_key
     VM_IP=$(wait_for_k3s)
+    configure_regulus_host "$VM_IP"
     fetch_kubeconfig "$VM_IP"
     deploy_helms
     bootstrap_backup_secrets
