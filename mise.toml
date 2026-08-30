@@ -1,4 +1,5 @@
 [tools]
+terraform = "1.9.2"
 terragrunt = "0.99.4"
 go = "1.22"
 tflint = "0.61.0"

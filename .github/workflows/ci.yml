@@ -12,17 +12,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
+      - name: Setup Tools
+        uses: jdx/mise-action@v4
         with:
-          terraform_version: "1.9.2"
-
-      - name: Setup TFLint
-        uses: terraform-linters/setup-tflint@v4
-        with:
-          tflint_version: "latest"
+          cache: true
 
       - name: Run Lint
         run: make lint
@@ -32,24 +27,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
-      - name: Setup Go
-        uses: actions/setup-go@v5
+      - name: Setup Tools
+        uses: jdx/mise-action@v4
         with:
-          go-version: "1.22"
-          cache-dependency-path: tests/go.sum
-
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: "1.9.2"
-          terraform_wrapper: false
-
-      - name: Setup Terragrunt
-        uses: autero1/action-terragrunt@v3
-        with:
-          terragrunt-version: "latest"
+          cache: true
 
       - name: Install Dependencies
         working-directory: tests

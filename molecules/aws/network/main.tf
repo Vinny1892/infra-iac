@@ -29,7 +29,7 @@ resource "aws_subnet" "private" {
   availability_zone = var.availability_zone[count.index]
 
   tags = merge({
-    Name        = "PrivateSubnet-${count.index + 1}"
+    Name = "PrivateSubnet-${count.index + 1}"
   }, var.extra_private_subnet_tags)
 }
 
