@@ -64,7 +64,28 @@ delete_argocd_applications() {
 
   echo "==> Removendo Applications do ArgoCD..."
   if ! $KUBECTL delete applications -n argocd --all --timeout=120s; then
-    echo "  AVISO: o delete das Applications nao concluiu no prazo."
+    echo "  AVISO: o delete das Applications nao concluiu no prazo; destravando."
+    # A Application `argocd` e self-managed: ao apaga-la, o controller que
+    # processaria o proprio finalizer morre junto e ela fica presa em
+    # Terminating com o finalizer de volta. Observado num ciclo real — 14 das 15
+    # Applications sairam limpas e apenas esta ficou. Uma segunda passada nas
+    # que sobraram destrava; a primeira passada nao basta porque o finalizer
+    # reaparece durante a propria remocao.
+    local preso
+    for preso in $($KUBECTL get applications -n argocd -o name 2>/dev/null || true); do
+      echo "  destravando $preso"
+      $KUBECTL patch "$preso" -n argocd --type merge \
+        -p '{"metadata":{"finalizers":null}}' >/dev/null 2>&1 || true
+    done
+
+    for i in $(seq 1 12); do
+      if [ "$($KUBECTL get applications -n argocd --no-headers 2>/dev/null | wc -l || true)" -eq 0 ]; then
+        echo "  Todas as Applications removidas."
+        return 0
+      fi
+      sleep 5
+    done
+    echo "  AVISO: ainda restam Applications:"
     $KUBECTL get applications -n argocd 2>/dev/null || true
   fi
 }
