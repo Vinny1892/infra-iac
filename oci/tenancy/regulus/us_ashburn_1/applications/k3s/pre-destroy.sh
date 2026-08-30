@@ -76,8 +76,10 @@ delete_pvc_workloads() {
   # recebe ordem de apagar os volumes, e o job longhorn-uninstall trava
   # esperando volumes que ninguem mandou remover.
   local namespaces
+  # `|| true`: com set -o pipefail, um kubectl que falha (cluster ja inexistente)
+  # derruba a atribuicao inteira e, por set -e, o script.
   namespaces=$($KUBECTL get pvc -A \
-    -o jsonpath='{range .items[*]}{.metadata.namespace}{"\n"}{end}' 2>/dev/null | sort -u)
+    -o jsonpath='{range .items[*]}{.metadata.namespace}{"\n"}{end}' 2>/dev/null | sort -u || true)
   if [ -z "$namespaces" ]; then
     echo "==> Nenhum PVC no cluster; nada a derrubar."
     return 0
@@ -103,7 +105,7 @@ delete_pvc_workloads() {
       case "$ns" in
         longhorn-system | kube-system) continue ;;
       esac
-      restantes=$((restantes + $($KUBECTL -n "$ns" get pods --no-headers 2>/dev/null | wc -l)))
+      restantes=$((restantes + $($KUBECTL -n "$ns" get pods --no-headers 2>/dev/null | wc -l || true)))
     done
     if [ "$restantes" -eq 0 ]; then
       echo "  Todos os pods que montavam PVC foram removidos."
@@ -136,7 +138,7 @@ wait_longhorn_volumes_drained() {
   echo "==> Aguardando o Longhorn liberar os volumes..."
   local restantes
   for i in $(seq 1 18); do
-    restantes=$($KUBECTL get volumes.longhorn.io -n longhorn-system --no-headers 2>/dev/null | wc -l)
+    restantes=$($KUBECTL get volumes.longhorn.io -n longhorn-system --no-headers 2>/dev/null | wc -l || true)
     if [ "$restantes" -eq 0 ]; then
       echo "  Todos os volumes do Longhorn foram liberados."
       return 0
