@@ -97,6 +97,11 @@ delete_pvc_workloads() {
     $KUBECTL -n "$ns" delete deployment,statefulset,daemonset --all --timeout=120s 2>/dev/null || true
   done
 
+  # Conta apenas o que de fato segura PVC. Uma versao anterior contava todos os
+  # pods do namespace e nunca chegava a zero, emitindo aviso mesmo com o destroy
+  # correndo bem: sobram pods `Completed` de Job (o backup final do Minecraft,
+  # por exemplo) e cargas geridas por CR de operator (vmagent), que nao sao
+  # Deployment/StatefulSet/DaemonSet e nao montam volume nenhum.
   echo "==> Aguardando os pods liberarem os PVCs..."
   local i restantes
   for i in $(seq 1 30); do
@@ -105,17 +110,21 @@ delete_pvc_workloads() {
       case "$ns" in
         longhorn-system | kube-system) continue ;;
       esac
-      restantes=$((restantes + $($KUBECTL -n "$ns" get pods --no-headers 2>/dev/null | wc -l || true)))
+      restantes=$((restantes + $($KUBECTL -n "$ns" get pods -o json 2>/dev/null \
+        | jq '[.items[]
+             | select(.status.phase == "Running" or .status.phase == "Pending")
+             | select(any(.spec.volumes[]?; has("persistentVolumeClaim")))]
+           | length' 2>/dev/null || echo 0)))
     done
     if [ "$restantes" -eq 0 ]; then
-      echo "  Todos os pods que montavam PVC foram removidos."
+      echo "  Nenhum pod segurando PVC."
       return 0
     fi
-    echo "  $restantes pod(s) ainda encerrando ($i/30); aguardando 5s..."
+    echo "  $restantes pod(s) ainda segurando PVC ($i/30); aguardando 5s..."
     sleep 5
   done
 
-  echo "  AVISO: ainda ha pods ativos nos namespaces com PVC."
+  echo "  AVISO: ainda ha $restantes pod(s) segurando PVC; o delete abaixo pode expirar."
 }
 
 wait_longhorn_volumes_drained() {
