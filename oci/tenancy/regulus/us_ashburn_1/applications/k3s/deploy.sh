@@ -252,15 +252,66 @@ deploy_root_app() {
 }
 
 verify() {
+  # Antes esta funcao apenas imprimia estado e sempre "passava" — o deploy podia
+  # terminar com exit 0 sobre um cluster quebrado. Agora ela afirma.
+  local kc=(kubectl --kubeconfig "$KUBECONFIG_PATH")
+  local falhas=0
+
   echo "==> Verificando cluster..."
   echo "--- Nodes ---"
-  kubectl --kubeconfig "$KUBECONFIG_PATH" get nodes
+  "${kc[@]}" get nodes
   echo "--- Storage classes ---"
-  kubectl --kubeconfig "$KUBECONFIG_PATH" get sc
+  "${kc[@]}" get sc
   echo "--- ArgoCD apps ---"
-  kubectl --kubeconfig "$KUBECONFIG_PATH" get applications -n argocd 2>/dev/null || echo "(ArgoCD ainda nao sincronizou)"
+  "${kc[@]}" get applications -n argocd 2>/dev/null || echo "(ArgoCD ainda nao sincronizou)"
   echo "--- Pods ---"
-  kubectl --kubeconfig "$KUBECONFIG_PATH" get pods -A
+  "${kc[@]}" get pods -A
+
+  echo "--- Verificacoes ---"
+
+  if "${kc[@]}" get nodes --no-headers 2>/dev/null | grep -q ' Ready'; then
+    echo "OK: node Ready."
+  else
+    echo "FALHA: nenhum node Ready."
+    falhas=$((falhas + 1))
+  fi
+
+  # O IPAddressPool e o unico motivo de um Service LoadBalancer ganhar
+  # EXTERNAL-IP neste cluster. Sem ele o Traefik nao publica IP no status do
+  # Ingress e o external-dns para de atualizar o DNS — o cluster fica
+  # inalcancavel por nome sem nada obvio quebrar.
+  if "${kc[@]}" -n metallb-system get ipaddresspool default-pool >/dev/null 2>&1; then
+    echo "OK: IPAddressPool do MetalLB presente."
+  else
+    echo "FALHA: IPAddressPool do MetalLB ausente."
+    falhas=$((falhas + 1))
+  fi
+
+  # Prova de ponta a ponta de que o MetalLB esta entregando: so passa quando o
+  # Service do Traefik realmente recebe o endereco.
+  local ip=""
+  for i in $(seq 1 60); do
+    ip=$("${kc[@]}" -n traefik get svc traefik \
+      -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || true)
+    if [ -n "$ip" ]; then
+      break
+    fi
+    echo "  aguardando EXTERNAL-IP no Service do Traefik ($i/60)..."
+    sleep 10
+  done
+  if [ -n "$ip" ]; then
+    echo "OK: Traefik com EXTERNAL-IP $ip."
+  else
+    echo "FALHA: Service do Traefik sem EXTERNAL-IP apos 10 min."
+    "${kc[@]}" -n traefik get svc traefik 2>/dev/null || true
+    falhas=$((falhas + 1))
+  fi
+
+  if [ "$falhas" -gt 0 ]; then
+    echo "ERROR: verificacao encontrou $falhas problema(s); o cluster NAO esta funcional."
+    exit 1
+  fi
+  echo "Cluster verificado."
 }
 
 destroy() {

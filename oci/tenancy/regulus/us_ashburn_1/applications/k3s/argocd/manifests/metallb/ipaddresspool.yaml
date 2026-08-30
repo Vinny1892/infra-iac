@@ -1,0 +1,42 @@
+# Configuracao do MetalLB sob GitOps.
+#
+# Por que isto existe em duas fontes:
+#
+# O seed em Terraform (organisms/oci/k3s/helms/main.tf, null_resource.metallb_config)
+# aplica estas mesmas CRs logo apos instalar o chart, porque no bootstrap o ArgoCD
+# ainda nao existe. Mas aquele recurso roda UMA vez, com trigger no id da
+# instancia — depois disso ninguem vigia. Se as CRs sumirem ou sofrerem drift, o
+# cluster fica sem quem restaure.
+#
+# O que quebra sem elas: sem IPAddressPool o MetalLB nao atribui EXTERNAL-IP a
+# Services LoadBalancer. O Service do Traefik fica <pending>, o IP nao aparece no
+# status do Ingress, e o external-dns — que le exatamente esse status — para de
+# criar e atualizar registros. O trafego real passa por hostPort e sobrevive, mas
+# o cluster deixa de ser alcancavel por nome assim que o DNS precisar mudar.
+#
+# O endereco e o IP publico RESERVADO (k3s-regulus-reserved-ip), criado pela unit
+# network/reserved_ip antes da VM justamente para ser conhecido e estavel. Ele
+# sobrevive a recriacao da instancia, por isso pode ser versionado aqui.
+#
+# ATENCAO: se o IP reservado mudar, atualize TAMBEM o seed em
+# organisms/oci/k3s/helms/main.tf (var.vm_public_ip vem do output da unit).
+apiVersion: metallb.io/v1beta1
+kind: IPAddressPool
+metadata:
+  name: default-pool
+  namespace: metallb-system
+spec:
+  addresses:
+    - "129.80.41.197-129.80.41.197"
+---
+# L2Advertisement anuncia o pool via ARP. Em nuvem publica o ARP nao alcanca a
+# internet — quem serve o trafego de verdade e o hostPort do Traefik. O papel
+# real deste par e fazer o Service ganhar EXTERNAL-IP para o external-dns ler.
+apiVersion: metallb.io/v1beta1
+kind: L2Advertisement
+metadata:
+  name: l2-advert
+  namespace: metallb-system
+spec:
+  ipAddressPools:
+    - default-pool

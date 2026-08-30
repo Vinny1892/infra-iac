@@ -1,0 +1,31 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: metallb-config
+  namespace: argocd
+  annotations:
+    # Wave mais precoce de todas. Qualquer Service LoadBalancer criado antes do
+    # IPAddressPool existir nasce <pending> e so ganha IP quando o MetalLB
+    # reconciliar — o Traefik (wave 0) depende disto para publicar o IP no
+    # status do Ingress, que e a fonte do external-dns.
+    argocd.argoproj.io/sync-wave: "-6"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/Vinny1892/infra-iac.git
+    targetRevision: master
+    path: oci/tenancy/regulus/us_ashburn_1/applications/k3s/argocd/manifests/metallb
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: metallb-system
+  syncPolicy:
+    automated:
+      # prune: false — o namespace e o chart do MetalLB pertencem ao seed
+      # Terraform, nao a este app. Aqui so as CRs de configuracao sao geridas.
+      prune: false
+      selfHeal: true
+    syncOptions:
+      # CreateNamespace fica de fora: o namespace vem do helm_release.metallb.
+      - ServerSideApply=true
