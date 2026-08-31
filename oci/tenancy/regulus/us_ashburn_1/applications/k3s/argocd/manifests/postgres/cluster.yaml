@@ -1,0 +1,45 @@
+# Cluster PostgreSQL de teste.
+#
+# Existe para exercitar backup e restore de ponta a ponta antes de haver um
+# consumidor real. Dimensionado para nao competir com as cargas que importam:
+# uma instancia, requests modestas, 5Gi de disco.
+#
+# `instances: 1` nao e economia, e honestidade: o cluster tem um unico no, entao
+# uma segunda instancia ficaria no mesmo host e nao protegeria contra a perda
+# dele. Quem protege aqui e o backup remoto no S3 — mesmo principio do mundo do
+# Minecraft.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: pg-teste
+  namespace: postgres
+spec:
+  instances: 1
+  imageName: ghcr.io/cloudnative-pg/postgresql:18
+
+  # O plugin substitui o antigo spec.backup.barmanObjectStore, removido do core
+  # do operator. `isWALArchiver` liga o archiving continuo — sem ele o backup
+  # base existe mas nao ha como recuperar ate um ponto no tempo.
+  plugins:
+    - name: barman-cloud.cloudnative-pg.io
+      isWALArchiver: true
+      parameters:
+        barmanObjectName: s3-backup
+
+  storage:
+    size: 5Gi
+    storageClass: longhorn
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 1Gi
+
+  # Banco e usuario criados na inicializacao. A senha do app vai para um Secret
+  # gerado pelo operator (pg-teste-app); nao ha credencial neste arquivo.
+  bootstrap:
+    initdb:
+      database: appdb
+      owner: appuser
