@@ -304,14 +304,15 @@ resource "kubernetes_secret" "onepassword_token" {
   depends_on = [kubernetes_namespace.external_secrets]
 }
 
-resource "helm_release" "external_secrets" {
-  name       = "external-secrets"
-  repository = "https://charts.external-secrets.io"
-  chart      = "external-secrets"
-  version    = "2.10.0"
-  namespace  = "external-secrets"
-  timeout    = 300
-  wait       = false
-
-  depends_on = [kubernetes_namespace.external_secrets]
-}
+# O chart do ESO NAO e instalado aqui, so pelo ArgoCD (app external-secrets,
+# wave -6). Diferente dos demais componentes, nada no seed depende dele: quem
+# consome ExternalSecret sao as Applications, que ja vem depois do ArgoCD.
+#
+# Instalar nos dois lugares quebrava o apply. O ArgoCD chega primeiro, aplica os
+# manifests direto e sem as anotacoes de posse do Helm; o helm_release entao
+# recusa adotar o que encontra:
+#   ServiceAccount "external-secrets-cert-controller" exists and cannot be
+#   imported into the current release: missing key "meta.helm.sh/release-name"
+#
+# Por isso o seed se limita ao que o ArgoCD nao tem como criar: o namespace e o
+# Secret com o token, que precisa vir de fora do cluster.
