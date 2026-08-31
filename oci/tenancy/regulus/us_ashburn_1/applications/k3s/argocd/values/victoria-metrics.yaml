@@ -104,6 +104,11 @@ vmagent:
 
 grafana:
   enabled: true
+  # Senha do admin vem do 1Password via ExternalSecret (manifests/monitoring/).
+  # Sem isto o chart gera `randAlphaNum 40` a cada render e o Secret passa a
+  # divergir do banco, que vive no PVC e so conhece a senha da inicializacao.
+  admin:
+    existingSecret: grafana-admin
   # O datasource VictoriaLogs e provisionado pelo proprio chart
   # (defaultDatasources.victorialogs), mas depende deste plugin. O Grafana
   # baixa na inicializacao do pod, entao exige saida para a internet.

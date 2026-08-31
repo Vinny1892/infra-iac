@@ -73,11 +73,13 @@ if ! op item get "$RCON_ITEM" --vault "$VAULT" --format json >"$TMP_DIR/rcon-ite
 fi
 
 # `op read` imprime newline. Kubernetes preserva bytes de --from-file, entao
-# remover esse byte aqui e essencial: ele invalida a assinatura AWS e tambem
-# alteraria a senha RCON.
+# remover esse byte aqui e essencial: ele invalida a assinatura AWS.
+#
+# A senha do RCON nao e mais lida aqui — o item acima continua sendo criado
+# porque o ESO precisa que ele exista, mas quem materializa o Secret e o
+# ExternalSecret.
 printf %s "$(op read "op://$VAULT/$S3_ITEM/username")" >"$TMP_DIR/AWS_ACCESS_KEY_ID"
 printf %s "$(op read "op://$VAULT/$S3_ITEM/password")" >"$TMP_DIR/AWS_SECRET_ACCESS_KEY"
-printf %s "$(op read "op://$VAULT/$RCON_ITEM/password")" >"$TMP_DIR/rcon-password"
 chmod 600 "$TMP_DIR"/*
 
 "${KUBECTL[@]}" get namespace minecraft >/dev/null 2>&1 || "${KUBECTL[@]}" create namespace minecraft
@@ -87,8 +89,11 @@ chmod 600 "$TMP_DIR"/*
   --from-file=AWS_SECRET_ACCESS_KEY="$TMP_DIR/AWS_SECRET_ACCESS_KEY" \
   --dry-run=client -o yaml | "${KUBECTL[@]}" apply -f -
 
-"${KUBECTL[@]}" -n minecraft create secret generic minecraft-rcon \
-  --from-file=password="$TMP_DIR/rcon-password" \
-  --dry-run=client -o yaml | "${KUBECTL[@]}" apply -f -
+# O Secret minecraft-rcon NAO e criado aqui: veio para o ESO
+# (argocd/manifests/minecraft/external-secret.yaml). Quem o consome — deployment
+# e CronJob de backup — vem do ArgoCD, depois do ESO existir.
+#
+# A credencial S3 acima continua neste script porque restore_minecraft_data
+# precisa dela antes de o deploy_root_app instalar o ESO.
 
 echo "Bootstrap concluido: credencial AWS minima guardada no 1Password e Secrets aplicados."
