@@ -1,0 +1,28 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: monitoring-config
+  namespace: argocd
+  annotations:
+    # Antes do victoria-metrics (wave 3): o chart do Grafana usa
+    # admin.existingSecret e nao gera mais a credencial, entao o Secret precisa
+    # existir ou o pod fica em CreateContainerConfigError.
+    argocd.argoproj.io/sync-wave: "2"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/Vinny1892/infra-iac.git
+    targetRevision: master
+    path: oci/tenancy/regulus/us_ashburn_1/applications/k3s/argocd/manifests/monitoring
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
