@@ -140,7 +140,12 @@ inputs = {
     # --node-external-ip: a VNIC nao recebe mais IP publico efemero (o endereco
     # vem do IP reservado, anexado apos a criacao da instancia), entao o k3s nao
     # descobre sozinho o endereco externo e o node ficaria sem ExternalIP.
-    # O CronJob traefik-patch-external-ip depende desse campo.
+    #
+    # O CronJob traefik-patch-external-ip, que era o consumidor citado aqui, foi
+    # removido: com o Service do Traefik em LoadBalancer, quem publica o IP no
+    # status do Ingress e o MetalLB, nao `spec.externalIPs`. A flag permanece
+    # porque o ExternalIP do node e metadado legitimo — mas nenhum consumidor
+    # atual dele foi reconfirmado.
     curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION="$K3S_VERSION" sh -s - server \
       --write-kubeconfig-mode 644 \
       --disable=traefik \
