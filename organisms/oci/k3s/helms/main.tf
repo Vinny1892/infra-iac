@@ -271,3 +271,47 @@ resource "kubernetes_secret" "argocd_repo" {
 
   depends_on = [helm_release.argocd]
 }
+
+# External Secrets Operator.
+#
+# Inverte o modelo do bootstrap: em vez de um script ler o 1Password uma vez no
+# deploy e criar Secrets que ninguem mais vigia, o ESO reconcilia continuamente
+# a partir de ExternalSecrets versionados no git. Secret apagado volta; valor
+# rotacionado no cofre se propaga.
+#
+# Fica no seed, e nao so no ArgoCD, porque os ExternalSecrets das Applications
+# precisam de um controller de pe para serem resolvidos.
+resource "kubernetes_namespace" "external_secrets" {
+  metadata {
+    name = "external-secrets"
+  }
+}
+
+# O unico segredo que ainda precisa ser injetado de fora: e a credencial que
+# permite buscar todas as outras. O ovo da galinha nao desaparece — mas encolhe
+# de varios Secrets para um.
+resource "kubernetes_secret" "onepassword_token" {
+  metadata {
+    name      = "onepassword-token"
+    namespace = "external-secrets"
+  }
+
+  data = {
+    token = var.onepassword_service_account_token
+  }
+
+  type       = "Opaque"
+  depends_on = [kubernetes_namespace.external_secrets]
+}
+
+resource "helm_release" "external_secrets" {
+  name       = "external-secrets"
+  repository = "https://charts.external-secrets.io"
+  chart      = "external-secrets"
+  version    = "2.10.0"
+  namespace  = "external-secrets"
+  timeout    = 300
+  wait       = false
+
+  depends_on = [kubernetes_namespace.external_secrets]
+}

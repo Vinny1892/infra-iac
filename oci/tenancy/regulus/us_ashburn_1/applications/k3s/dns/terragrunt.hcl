@@ -61,7 +61,7 @@ EOF
 }
 
 inputs = {
-  zone_id               = "1e9c3dce628d58fa69c21d0f67480d58"
-  vm_ip                 = dependency.vm.outputs.instance_public_ip
-  cloudflare_api_token  = run_cmd("--terragrunt-quiet", "op", "read", "op://Lab-IAC/Cloudflare API Token/credential")
+  zone_id              = "1e9c3dce628d58fa69c21d0f67480d58"
+  vm_ip                = dependency.vm.outputs.instance_public_ip
+  cloudflare_api_token = run_cmd("--terragrunt-quiet", "op", "read", "op://Lab-IAC/Cloudflare API Token/credential")
 }

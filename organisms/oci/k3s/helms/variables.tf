@@ -44,3 +44,9 @@ variable "github_oauth_client_secret" {
   type      = string
   sensitive = true
 }
+
+variable "onepassword_service_account_token" {
+  description = "Token do Service Account do 1Password usado pelo External Secrets Operator (op://IAM/Service Account Auth Token: K3s/credencial)"
+  type        = string
+  sensitive   = true
+}

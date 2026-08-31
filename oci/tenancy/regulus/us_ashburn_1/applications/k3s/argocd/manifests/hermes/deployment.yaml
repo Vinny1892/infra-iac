@@ -53,19 +53,26 @@ spec:
             # O Cloudflare Access segue como primeira camada; esta e a segunda,
             # exigida pela propria aplicacao.
             #
-            # O Secret hermes-dashboard-auth NAO esta neste repositorio: e
-            # criado fora do GitOps e precisa ser recriado a mao apos um
-            # destroy. Guarda o hash scrypt, nunca a senha em texto puro.
+            # O Secret hermes-dashboard-auth vem do 1Password via External
+            # Secrets Operator (ExternalSecret em manifests/external-secrets/),
+            # entao sobrevive a recriacao do cluster sem passo manual.
+            #
+            # Usa a variante em texto puro em vez de PASSWORD_HASH: o valor
+            # guardado no 1Password e a propria senha, e o ESO transporta o que
+            # existe sem transformar. O Hermes hasheia em memoria no load, e o
+            # PASSWORD tem precedencia sobre PASSWORD_HASH.
+            # Custo assumido: a senha fica legivel no Secret do cluster e no
+            # cofre — aceitavel aqui, com o dashboard atras do Cloudflare.
             - name: HERMES_DASHBOARD_BASIC_AUTH_USERNAME
               valueFrom:
                 secretKeyRef:
                   name: hermes-dashboard-auth
                   key: username
-            - name: HERMES_DASHBOARD_BASIC_AUTH_PASSWORD_HASH
+            - name: HERMES_DASHBOARD_BASIC_AUTH_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: hermes-dashboard-auth
-                  key: password_hash
+                  key: password
             # Cada comando do agente roda em um container separado no daemon
             # Docker do sidecar abaixo. O Hermes em si continua sem privilege.
             - name: TERMINAL_ENV
