@@ -400,6 +400,8 @@ O script `pre-destroy.sh` é chamado automaticamente pelo `destroy` e limpa:
 
 - **HTTP 401 no Grafana pode ser bloqueio, não senha errada.** Após algumas tentativas falhas o Grafana bloqueia o usuário temporariamente (`too many consecutive incorrect login attempts`). O código HTTP é idêntico ao de senha inválida — só o log do servidor distingue. Sempre conferir `kubectl logs deploy/vmks-grafana -n monitoring` antes de concluir.
 
+- **O MCP do Grafana consulta VictoriaLogs nativamente.** A ferramenta `query_loki_logs` atende **Loki e VictoriaLogs**: ela aceita LogQL no primeiro e **LogsQL** no segundo, bastando passar o `datasourceUid` do VictoriaLogs. O nome engana e induz a concluir que so serve para Loki — nao e preciso recorrer a `grafana_api_request` nem ao proxy de datasource. Exemplo que funciona: `{kubernetes.pod_namespace="postgres"}`.
+
 > Detalhamento completo do ciclo destroy/deploy, cadeias causais e medições: [`docs/REGULUS-CICLO-DE-VIDA.md`](docs/REGULUS-CICLO-DE-VIDA.md)
 
 ### ArgoCD — Arquitetura e Self-Management
