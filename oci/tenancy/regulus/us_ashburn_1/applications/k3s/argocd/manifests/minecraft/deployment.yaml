@@ -58,7 +58,17 @@ spec:
             failureThreshold: 3
           resources:
             requests:
-              cpu: "2"
+              # `cpu` e piso de agendamento, nao teto de consumo. Com "2" o pod
+              # reservava metade do no (2000m de 4000m) enquanto usava ~24m, e o
+              # cluster ficava com 97% de CPU comprometida sem carga real —
+              # qualquer workload novo deixava de ser agendavel.
+              #
+              # Nao ha `limits.cpu` aqui de proposito: o servidor precisa poder
+              # usar mais nos picos (chunk gen, muitos jogadores), e sem limite
+              # ele usa o que estiver ocioso. Reduzir o request nao muda isso.
+              cpu: 500m
+              # Memoria continua reservada de verdade: e heap de JVM, nao
+              # comprime, e ficar sem ela derruba o servidor.
               memory: 7Gi
             limits:
               memory: 8Gi
