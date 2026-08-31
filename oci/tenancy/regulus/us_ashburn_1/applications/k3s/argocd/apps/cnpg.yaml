@@ -1,0 +1,42 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cnpg
+  namespace: argocd
+  annotations:
+    # Antes do plugin (-3) e do ObjectStore (-2): ambos dependem das CRDs e do
+    # operator para funcionar.
+    argocd.argoproj.io/sync-wave: "-4"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://cloudnative-pg.github.io/charts
+    chart: cloudnative-pg
+    targetRevision: 0.29.0
+    helm:
+      releaseName: cnpg
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: cnpg-system
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    # Mesma corrida do victoria-metrics (defeito 7): CRDs e CRs no mesmo sync.
+    retry:
+      limit: 5
+      backoff:
+        duration: 30s
+        factor: 2
+        maxDuration: 5m
+    syncOptions:
+      - CreateNamespace=true
+      # Obrigatorio, nao opcional: as CRDs do CNPG passam de 256 KiB e o
+      # client-side apply do ArgoCD grava last-applied-configuration dentro do
+      # proprio objeto, estourando o limite de metadata.annotations:
+      #   CustomResourceDefinition "poolers.postgresql.cnpg.io" is invalid:
+      #   metadata.annotations: Too long: may not be more than 262144 bytes
+      - ServerSideApply=true
+      - SkipDryRunOnMissingResource=true

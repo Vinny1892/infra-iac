@@ -1,0 +1,39 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: postgres
+  namespace: argocd
+  annotations:
+    # Depois do Longhorn (wave 1), nao so do operator (-4) e do plugin (-3).
+    # O ObjectStore em si nao precisa de storage, mas o Cluster PostgreSQL que
+    # vier para este mesmo diretorio precisa — e criar PVC antes de o Longhorn
+    # existir deixaria o banco Pending sem causa obvia.
+    argocd.argoproj.io/sync-wave: "2"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/Vinny1892/infra-iac.git
+    targetRevision: master
+    path: oci/tenancy/regulus/us_ashburn_1/applications/k3s/argocd/manifests/postgres
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: postgres
+  syncPolicy:
+    automated:
+      # prune: false — quando um Cluster PostgreSQL existir aqui, uma remocao
+      # acidental do app nao deve levar junto o banco e seus PVCs.
+      prune: false
+      selfHeal: true
+    retry:
+      limit: 5
+      backoff:
+        duration: 30s
+        factor: 2
+        maxDuration: 5m
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+      # O ObjectStore e uma CRD do plugin, sujeita a mesma corrida do defeito 7.
+      - SkipDryRunOnMissingResource=true

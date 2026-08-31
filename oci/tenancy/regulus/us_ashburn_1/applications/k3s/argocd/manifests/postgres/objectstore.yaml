@@ -1,0 +1,27 @@
+# Destino de backup do PostgreSQL, via plugin Barman Cloud.
+#
+# O Barman Cloud saiu do core do operator (deprecado desde a 1.26) e virou
+# plugin CNPG-I. Por isso a configuracao vive nesta CRD propria do plugin, e nao
+# em `spec.backup.barmanObjectStore` do Cluster. A retencao tambem migrou para
+# ca: `spec.backup.retentionPolicy` do operator esta deprecado.
+#
+# ATENCAO: o ObjectStore precisa estar no MESMO namespace do Cluster que o usa.
+# Um Cluster em outro namespace exige o seu proprio ObjectStore.
+apiVersion: barmancloud.cnpg.io/v1
+kind: ObjectStore
+metadata:
+  name: s3-backup
+  namespace: postgres
+spec:
+  retentionPolicy: "30d"
+  configuration:
+    # Mesmo bucket dos backups do Longhorn, prefixo distinto. Se a policy do IAM
+    # for restrita a prefixos, este caminho precisa ser liberado.
+    destinationPath: "s3://backup-longhorn-k3s/cnpg/"
+    s3Credentials:
+      accessKeyId:
+        name: cnpg-s3-creds
+        key: ACCESS_KEY_ID
+      secretAccessKey:
+        name: cnpg-s3-creds
+        key: ACCESS_SECRET_KEY
