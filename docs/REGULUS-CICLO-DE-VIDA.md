@@ -419,19 +419,87 @@ Três leituras honestas desses números:
    do release caiu para 180s (`organisms/oci/k3s/helms/main.tf:176`), com folga de
    ~60s sobre o tempo real observado.
 
+## Segredos: do bootstrap ao External Secrets Operator
+
+O modelo antigo era um script lendo o 1Password **uma vez**, no deploy. O que ele
+não criava não existia, e o que criava ninguém vigiava. Dois sintomas vinham daí:
+o Hermes ficava `CreateContainerConfigError` depois de toda recriação (seus dois
+Secrets eram feitos à mão) e a senha do Grafana divergia do banco a cada sync.
+
+Hoje:
+
+```mermaid
+flowchart LR
+    OP["op://IAM/Service Account<br/>Auth Token: K3s"]
+    TG["Terragrunt<br/>helms/terragrunt.hcl"]
+    SEC["Secret<br/>onepassword-token"]
+    CSS["ClusterSecretStore<br/>→ vault Lab-IAC"]
+    ES["ExternalSecret<br/>(git)"]
+    K["Secret nativo<br/>reconciliado"]
+    BS["bootstrap-longhorn-backup.sh"]
+    LH["Secret longhorn-aws-backup"]
+
+    OP --> TG --> SEC --> CSS --> ES --> K
+    BS --> LH
+
+    style OP fill:#2d333b,stroke:#6d5dfc,color:#e6edf3
+    style TG fill:#2d333b,stroke:#6d5dfc,color:#e6edf3
+    style SEC fill:#2d333b,stroke:#6d5dfc,color:#e6edf3
+    style CSS fill:#2d333b,stroke:#6d5dfc,color:#e6edf3
+    style ES fill:#2d333b,stroke:#6d5dfc,color:#e6edf3
+    style K fill:#2d333b,stroke:#6d5dfc,color:#e6edf3
+    style BS fill:#161b22,stroke:#30363d,color:#8b949e
+    style LH fill:#161b22,stroke:#30363d,color:#8b949e
+```
+
+O provider é `onepasswordSDK`, não Connect: autentica direto na nuvem com token de
+Service Account, sem subir o servidor Connect — mais um componente com estado.
+Um único `ClusterSecretStore` atende o vault `Lab-IAC`; o provider é por vault,
+por desenho, para impedir acesso cruzado.
+
+### Por que o Longhorn ficou de fora
+
+`restore_minecraft_data` precisa da credencial S3 para ler o catálogo de backups,
+e roda **antes** de `deploy_root_app` instalar o ESO
+(`oci/tenancy/regulus/us_ashburn_1/applications/k3s/deploy.sh:305-311`). Migrá-la
+faria um cluster recriado subir sem o mundo. O `bootstrap-longhorn-backup.sh`
+existe hoje só por causa dela — de três Secrets para um.
+
+### Armadilhas encontradas ao adotar
+
+**Diretório de manifests sem Application.** O `ExternalSecret` do Grafana foi
+adicionado em `manifests/monitoring/` sem o app que sincroniza aquele caminho.
+Como os values já apontavam `admin.existingSecret`, o chart parou de gerar o
+Secret antigo e o substituto nunca chegou: o pod novo travou em
+`CreateContainerConfigError`. Só não virou queda porque o pod antigo sobreviveu.
+Todo diretório em `argocd/manifests/` precisa do seu app.
+
+**Instalar o mesmo chart pelo seed e pelo ArgoCD.** O ArgoCD chega primeiro
+(wave -6) e aplica os manifests sem as anotações de posse do Helm; o
+`helm_release` então recusa adotá-los (`missing key "meta.helm.sh/release-name"`).
+A regra de manter seed e Application em par vale para o que o seed precisa
+instalar antes de o ArgoCD existir — e o ESO não é um desses.
+
+**Capturar a senha do Secret que o chart regenera.** Ao migrar o Grafana para
+`existingSecret`, o valor guardado no cofre precisa ser o que o banco já conhece.
+O `vmks-grafana` era regenerado a cada sync; capturá-lo depois de alguns deploys
+pegou uma senha que o banco nunca teve, e exigiu
+`grafana cli admin reset-admin-password` para alinhar. Erro de ordem, não de
+conceito.
+
 ---
 
 ## Estado conhecido em aberto
 
 | Item | Situação |
 |---|---|
-| Secrets do Hermes | `hermes-dashboard-auth` e `hermes-telegram-bot` não são criados por nenhum bootstrap. Valores existem em `op://Personal/Hermes` e `op://Personal/Telegram`. O deployment espera a chave `password_hash`, mas o campo no 1Password está em texto puro. |
-| Senha do Grafana | O chart gera `randAlphaNum 40` **a cada render**, enquanto o banco vive num PVC. O secret passa a anunciar uma senha que o banco não conhece. Resolver com `admin.existingSecret`. |
+| Secrets do Hermes | **Resolvido** — vêm do 1Password via ESO. O deployment passou a usar `HERMES_DASHBOARD_BASIC_AUTH_PASSWORD` (texto puro, precedência sobre a variante `_HASH`, hasheada em memória no load), porque o ESO transporta valores sem transformar. |
+| Senha do Grafana | **Resolvido** — `admin.existingSecret` apontando para `grafana-admin`, vindo do cofre. O chart deixou de gerar a credencial. |
 | `apt_retry` sob contenção | Não exercitado — ver ressalva no defeito 2. |
 
-O padrão comum entre os dois primeiros é o mesmo: **secrets que não sobrevivem a
-uma recriação**. O `bootstrap-longhorn-backup.sh` já resolve isso para Longhorn e
-RCON lendo do 1Password antes do ArgoCD sincronizar — é o modelo a generalizar.
+O padrão comum entre os dois primeiros era o mesmo — **secrets que não sobrevivem
+a uma recriação** — e foi resolvido generalizando a ideia do bootstrap com o
+External Secrets Operator (seção acima).
 
 ---
 

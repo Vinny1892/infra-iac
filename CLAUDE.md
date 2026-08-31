@@ -181,6 +181,59 @@ eval $(op signin)
 o 1Password CLI; nunca use `~/.ssh/id_ed25519` como fallback, nunca grave a chave
 privada no repositorio e nunca a inclua em logs.
 
+### Secrets no cluster OCI — External Secrets Operator
+
+**Padrão a seguir para todo segredo novo consumido dentro do cluster.**
+
+```
+op://IAM/Service Account Auth Token: K3s   ← único segredo injetado de fora
+   ↓ Terragrunt (helms/terragrunt.hcl), com `op item get`
+Secret onepassword-token  (criado pelo seed Terraform)
+   ↓
+ClusterSecretStore "onepassword" → vault Lab-IAC
+   ↓
+ExternalSecret (versionado no git) → Secret nativo, reconciliado
+```
+
+Para adicionar um segredo: criar o item no `Lab-IAC` e um `ExternalSecret` no
+git. Nada de script. O `remoteRef.key` usa `<item>/[section/]<campo>`.
+
+**Regras que não são óbvias:**
+
+- **Diretório novo de manifests exige uma Application própria.** Todo diretório
+  em `argocd/manifests/` tem seu app (`traefik-config`, `monitoring-config`,
+  `external-secrets-config`, ...). Adicionar manifesto sem criar o app deixa o
+  arquivo no git sem nunca ser aplicado — e se os values já dependerem dele, o
+  workload quebra. Aconteceu com o Grafana: o chart parou de gerar o Secret e o
+  substituto nunca chegou; só não caiu porque o pod antigo sobreviveu.
+
+- **O ESO é instalado só pelo ArgoCD, não pelo seed.** Ao contrário dos demais
+  charts, nada no seed depende dele. Instalar nos dois lugares faz o
+  `helm_release` recusar adotar o que o ArgoCD já aplicou (`missing key
+  "meta.helm.sh/release-name"`). O seed cria apenas o namespace e o Secret do
+  token, que o ArgoCD não teria como criar.
+
+- **O namespace pertence ao seed.** A Application do ESO não usa
+  `CreateNamespace=true`, senão o `kubernetes_namespace` do Terraform falha com
+  "already exists". Mesmo padrão do cert-manager.
+
+- **`op read` recusa títulos com dois-pontos.** `op://IAM/Service Account Auth
+  Token: K3s/credencial` responde `invalid secret reference`. Use
+  `op item get "<titulo>" --vault <v> --fields <campo> --reveal`.
+
+**O que NÃO migra para o ESO:** a credencial S3 do Longhorn
+(`Lab-IAC/Longhorn AWS S3 Backup`) continua no `bootstrap-longhorn-backup.sh`,
+porque `restore_minecraft_data` precisa dela **antes** de `deploy_root_app`
+instalar o ESO. Migrar quebraria o restore num cluster recriado. O bootstrap
+existe hoje só por causa dela.
+
+**Ao apontar `existingSecret` para um chart que gerava a senha** (caso do
+Grafana), guarde no cofre a senha **que o banco já conhece**, não uma nova — o
+banco vive num PVC e só aceita a da inicialização. Se já divergiu, alinhe com
+`grafana cli admin reset-admin-password`. Cuidado com a ordem: capturar o valor
+de um Secret que o chart regenera a cada sync pega uma senha que o banco nunca
+teve.
+
 The `deploy.sh` script validates `op` CLI auth before running (preflight check).
 
 ### K3s Cluster Lifecycle
@@ -343,7 +396,7 @@ O script `pre-destroy.sh` é chamado automaticamente pelo `destroy` e limpa:
 
 - **Registro DNS órfão bloqueia o external-dns.** Um `CNAME` remanescente (ex.: apontando para um Cloudflare Tunnel morto) impede a criação do `A` no mesmo nome, e o external-dns **não o remove** se o TXT de posse tiver outro `owner` — ele roda com `txtOwnerId: k3s-oci` e ignora o que não é dele. Sintoma: HTTP 530 do Cloudflare com todos os pods saudáveis. Diagnóstico: comparar os registros do host quebrado com os de um host que funciona. Fix: apagar o CNAME órfão; o external-dns cria o A em segundos.
 
-- **Senha do Grafana não sobrevive a sync.** O chart gera `randAlphaNum 40` a cada render e o banco vive num PVC — o `GF_SECURITY_ADMIN_PASSWORD` só vale na primeira inicialização. A cada sync do ArgoCD o secret passa a anunciar uma senha que o banco não conhece. Paliativo: `grafana cli --homepath="$GF_PATHS_HOME" --config="$GF_PATHS_CONFIG" admin reset-admin-password "$GF_SECURITY_ADMIN_PASSWORD"` dentro do pod. Solução: `admin.existingSecret` apontando para secret estável vindo do 1Password.
+- **Senha do Grafana não sobrevive a sync.** O chart gera `randAlphaNum 40` a cada render e o banco vive num PVC — o `GF_SECURITY_ADMIN_PASSWORD` só vale na primeira inicialização. A cada sync do ArgoCD o secret passa a anunciar uma senha que o banco não conhece. Paliativo: `grafana cli --homepath="$GF_PATHS_HOME" --config="$GF_PATHS_CONFIG" admin reset-admin-password "$GF_SECURITY_ADMIN_PASSWORD"` dentro do pod. Solução aplicada: `admin.existingSecret` apontando para o Secret `grafana-admin`, vindo do 1Password via ESO.
 
 - **HTTP 401 no Grafana pode ser bloqueio, não senha errada.** Após algumas tentativas falhas o Grafana bloqueia o usuário temporariamente (`too many consecutive incorrect login attempts`). O código HTTP é idêntico ao de senha inválida — só o log do servidor distingue. Sempre conferir `kubectl logs deploy/vmks-grafana -n monitoring` antes de concluir.
 
