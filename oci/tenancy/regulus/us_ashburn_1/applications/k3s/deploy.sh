@@ -7,7 +7,10 @@ OCI_UNIT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"  # us_ashburn_1/
 SSH_KEY_REF="op://Personal/Pessoal/private key?ssh-format=openssh"
 SSH_PUBLIC_KEY_REF="op://Personal/Pessoal/public key"
 SSH_KEY=""
-SSH_PORT="22"
+# Precisa bater com local.ssh_port da unit applications/compute/vm e com
+# ssh_port da unit network/vcn. A 22 pertence ao honeypot.
+# Para falar com uma VM antiga, ainda na 22: REGULUS_SSH_PORT=22 bash deploy.sh
+SSH_PORT="${REGULUS_SSH_PORT:-62222}"
 SSH_USER="ubuntu"
 KUBECONFIG_PATH="${K3S_OCI_KUBECONFIG:-$HOME/.kube/k3s-oci.yaml}"
 TEMP_SSH_KEY=""

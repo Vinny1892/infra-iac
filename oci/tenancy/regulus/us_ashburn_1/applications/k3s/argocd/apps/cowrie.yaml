@@ -1,0 +1,29 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cowrie
+  namespace: argocd
+  annotations:
+    # Wave 3: depende do Longhorn (wave 1) já ter registrado a storage class,
+    # senão o PVC fica Pending e o Deployment não agenda.
+    argocd.argoproj.io/sync-wave: "3"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/Vinny1892/infra-iac.git
+    targetRevision: master
+    path: oci/tenancy/regulus/us_ashburn_1/applications/k3s/argocd/manifests/cowrie
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: honeypot
+  syncPolicy:
+    automated:
+      # prune ligado: os manifests aqui são todos reconstruíveis a partir do
+      # git. O PVC com as capturas é a exceção e carrega Prune=false próprio.
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

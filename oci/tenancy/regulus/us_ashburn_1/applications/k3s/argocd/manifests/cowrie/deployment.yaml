@@ -1,0 +1,96 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cowrie
+  namespace: honeypot
+spec:
+  replicas: 1
+  # Recreate, não RollingUpdate: o PVC é ReadWriteOnce e o hostPort 22 é único
+  # no node. Dois pods simultâneos travariam o rollout nos dois motivos.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: cowrie
+  template:
+    metadata:
+      labels:
+        app: cowrie
+      annotations:
+        # Mount por subPath não recebe update de ConfigMap: o kubelet só
+        # atualiza mounts de diretório. Ao mexer no cowrie-config, incremente
+        # esta revisão no mesmo commit — é o que faz o ArgoCD recriar o pod.
+        config-revision: "1"
+    spec:
+      securityContext:
+        # A imagem declara User 999:999 e é o dono de /cowrie. O fsGroup faz o
+        # Longhorn montar o volume com esse grupo — sem ele o PVC monta como
+        # root e o Cowrie não escreve os logs.
+        runAsUser: 999
+        runAsGroup: 999
+        fsGroup: 999
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: cowrie
+          # Pinado por digest: a tag 3.0.13 é a corrente, mas honeypot é um
+          # processo que fala com atacante — a imagem não pode mudar sozinha.
+          image: cowrie/cowrie:3.0.13@sha256:42e01e0e5fe705a0a63dacc0f1992b2d230740ac149af7675f48197abf740d44
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            # readOnlyRootFilesystem fica false porque o Cowrie gera as host
+            # keys SSH em etc/ no primeiro boot. Montar um emptyDir sobre etc/
+            # resolveria a escrita, mas esconderia o cowrie.cfg.dist da imagem.
+            readOnlyRootFilesystem: false
+          ports:
+            - name: ssh
+              containerPort: 2222
+              # O tráfego da porta 22 do node cai aqui. Depende do sshd real ter
+              # saído da 22 (user_data da VM move para 62222) — se os dois
+              # disputarem a porta, o DNAT do portmap vence e o acesso
+              # administrativo se perde.
+              hostPort: 22
+              protocol: TCP
+          volumeMounts:
+            - name: var
+              mountPath: /cowrie/cowrie-git/var
+            - name: config
+              mountPath: /cowrie/cowrie-git/etc/cowrie.cfg
+              subPath: cowrie.cfg
+              readOnly: true
+            - name: config
+              mountPath: /cowrie/cowrie-git/etc/userdb.txt
+              subPath: userdb.txt
+              readOnly: true
+          readinessProbe:
+            tcpSocket:
+              port: 2222
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: 2222
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              # Teto baixo de propósito: o pod é alvo de tráfego hostil e divide
+              # 4 OCPU com o resto do cluster. Uma enxurrada de conexões não
+              # pode competir com o K3s.
+              cpu: 500m
+              memory: 512Mi
+      volumes:
+        - name: var
+          persistentVolumeClaim:
+            claimName: cowrie-var
+        - name: config
+          configMap:
+            name: cowrie-config

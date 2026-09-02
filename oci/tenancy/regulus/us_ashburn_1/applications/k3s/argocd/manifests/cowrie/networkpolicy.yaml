@@ -1,0 +1,30 @@
+# O Cowrie é, por definição, um processo que entrega shell a quem ataca. Ele
+# roda emulado (não executa comando de verdade), mas o pod continua sendo um
+# ponto de rede dentro do cluster — e o mesmo cluster hospeda ArgoCD, Longhorn e
+# a API do K3s. Esta política existe para que uma falha no emulador não vire
+# movimento lateral.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: cowrie-isolation
+  namespace: honeypot
+spec:
+  podSelector:
+    matchLabels:
+      app: cowrie
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Sem "from": libera qualquer origem, que é o ponto — o tráfego chega pelo
+    # DNAT do hostPort com o IP do atacante preservado.
+    - ports:
+        - port: 2222
+          protocol: TCP
+  # Nenhuma regra de egress = egress negado por completo. O efeito colateral
+  # consciente: quando o atacante roda `wget http://.../mirai.arm`, o Cowrie
+  # registra a URL mas não consegue baixar a amostra. Trocar a captura de
+  # binário por isolamento é o negócio certo num cluster que roda coisa real.
+  # Para coletar amostras, o caminho seguro é subir um segundo Cowrie numa VM
+  # descartável, nunca abrir egress aqui.
+  egress: []

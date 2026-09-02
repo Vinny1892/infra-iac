@@ -1,16 +1,36 @@
 locals {
   effective_primary_subnet_id = var.primary_subnet_id != "" ? var.primary_subnet_id : var.subnet_id
   use_reserved_public_ip      = var.reserved_public_ip_id != ""
+  # user_data minimo para instancias que so precisam do sshd fora da 22. Quem
+  # passa user_data_base64 monta o proprio bootstrap e ignora este bloco.
   generated_user_data = var.ssh_port != 22 ? base64encode(<<-EOF
     #!/bin/bash
+    set -euo pipefail
     PORT=${var.ssh_port}
-    if grep -q "^#*Port " /etc/ssh/sshd_config; then
-      sed -i "s/^#*Port .*/Port $PORT/" /etc/ssh/sshd_config
+
+    # Drop-in, nao sed no sshd_config: o arquivo principal do Ubuntu abre com
+    # Include /etc/ssh/sshd_config.d/*.conf e o cloud-image ja escreve ali.
+    install -d -m 755 /etc/ssh/sshd_config.d
+    printf 'Port %s\n' "$PORT" > /etc/ssh/sshd_config.d/99-port.conf
+
+    # Ubuntu 24.04 usa socket activation no sshd. Com ssh.socket habilitado a
+    # porta vem do ListenStream da unit e a diretiva Port e ignorada — sem este
+    # override o sshd continuaria na 22 e a instancia ficaria inacessivel.
+    if systemctl is-enabled --quiet ssh.socket 2>/dev/null; then
+      install -d -m 755 /etc/systemd/system/ssh.socket.d
+      printf '%s\n' "[Socket]" "ListenStream=" "ListenStream=$PORT" \
+        > /etc/systemd/system/ssh.socket.d/override.conf
+      systemctl daemon-reload
+      systemctl restart ssh.socket
     else
-      echo "Port $PORT" >> /etc/ssh/sshd_config
+      sshd -t
+      systemctl restart ssh
     fi
-    ufw allow $PORT/tcp 2>/dev/null || true
-    systemctl restart sshd
+
+    # A imagem Ubuntu da OCI fecha a chain INPUT com REJECT e nao traz ufw.
+    iptables -I INPUT -p tcp --dport "$PORT" -j ACCEPT
+    apt-get install -y iptables-persistent -q
+    netfilter-persistent save
   EOF
   ) : null
   effective_user_data = var.user_data_base64 != null ? var.user_data_base64 : local.generated_user_data

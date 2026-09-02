@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: honeypot
+  labels:
+    # Sem enforce baseline/restricted de propósito: as Pod Security Standards
+    # listam Host Ports entre os itens que o baseline proíbe, e este pod existe
+    # justamente para ocupar a porta 22 do node. O confinamento vem do
+    # securityContext do Deployment (não-root, sem capabilities, sem escalação)
+    # e da NetworkPolicy que corta o egress.
+    pod-security.kubernetes.io/enforce: privileged
+    pod-security.kubernetes.io/warn: baseline
+    pod-security.kubernetes.io/audit: baseline

@@ -338,6 +338,28 @@ O script `pre-destroy.sh` é chamado automaticamente pelo `destroy` e limpa:
 
 **Traefik** usa DaemonSet com `hostPort: 80/443` + service `LoadBalancer` (MetalLB publica o IP no Ingress status para o external-dns). Não usa redirect HTTP→HTTPS (incompatível com Cloudflare proxy Flexible SSL).
 
+### Acesso SSH da Regulus e o honeypot na 22
+
+**O SSH real da `vm-regulus` fica na porta 62222. A porta 22 é do honeypot (Cowrie) e não dá acesso a nada.**
+
+A tenancy não tem mais IP residencial fixo, então `ssh_allowed_cidr` da unit `network/vcn` é `0.0.0.0/0`. O que substitui a restrição por CIDR:
+
+- porta alta — `ssh_port = 62222` na security list, `local.ssh_port` no user_data da VM e `SSH_PORT` no `deploy.sh`; **os três precisam bater**;
+- `PasswordAuthentication no` + `PermitRootLogin no` via drop-in `/etc/ssh/sshd_config.d/99-regulus.conf`;
+- Cowrie ocupando a 22 como sensor.
+
+Porta alta é ofuscação, não controle de acesso: ela corta varredura automatizada, não alvo dirigido. Quem protege de fato é a autenticação só por chave.
+
+**Não há canal de recuperação fora do SSH.** O plugin Compute Instance Run Command não é exposto nesta instância (a API responde `not present`) — por isso o `configure_regulus_host` do `deploy.sh` foi movido para SSH. Se o sshd subir na porta errada, a saída é recriar a VM, não consertá-la de fora.
+
+**Ubuntu 24.04 usa socket activation no sshd.** Com `ssh.socket` habilitado, quem define a porta é o `ListenStream` da unit e a diretiva `Port` do `sshd_config` é *silenciosamente ignorada*. Por isso o user_data escreve `/etc/systemd/system/ssh.socket.d/override.conf` com `ListenStream=` vazio (para limpar a 22 herdada) seguido da porta nova. Trocar a porta só pelo `sshd_config` deixa o serviço na 22.
+
+**Nunca use heredoc aninhado no user_data.** O script vive dentro de um heredoc `<<-EOF` do HCL, que corta a menor indentação comum do bloco. Um heredoc de shell exige tabs, e um tab (1 caractere) faz o HCL passar a cortar 1 caractere em vez de 4 — o `#!/bin/bash` sai indentado e o cloud-init ignora o script inteiro, sem erro visível. Use `printf '%s\n'`.
+
+Ordem obrigatória: o sshd sai da 22 **antes** de o Cowrie subir. Os dois disputam a porta e o DNAT do `hostPort` vence.
+
+Para falar com uma VM antiga que ainda esteja na 22: `REGULUS_SSH_PORT=22 bash deploy.sh <modo>`.
+
 ### Deploy Script — Metodologia de Correção
 
 **Regra fundamental: se algo quebra, a correção vai no script. Nunca corrigir manualmente e seguir em frente.** O ciclo é: quebrou → diagnostica → corrige no script → `deploy.sh destroy` → `deploy.sh deploy` do zero → só para quando o script funcionar de ponta a ponta sem intervenção. Sempre validar rodando o destroy seguido do deploy completo — não basta testar só o passo que quebrou, porque o script precisa funcionar end-to-end em qualquer estado.
