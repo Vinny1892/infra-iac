@@ -1,6 +1,13 @@
 locals {
   effective_primary_subnet_id = var.primary_subnet_id != "" ? var.primary_subnet_id : var.subnet_id
   use_reserved_public_ip      = var.reserved_public_ip_id != ""
+
+  # O agent_config so e emitido se houver plugin pedido: um bloco vazio faria a
+  # OCI desabilitar os plugins ligados por padrao na imagem.
+  enabled_agent_plugins = compact([
+    var.enable_run_command_plugin ? "Compute Instance Run Command" : "",
+    var.enable_bastion_plugin ? "Bastion" : "",
+  ])
   # user_data minimo para instancias que so precisam do sshd fora da 22. Quem
   # passa user_data_base64 monta o proprio bootstrap e ignora este bloco.
   generated_user_data = var.ssh_port != 22 ? base64encode(<<-EOF
@@ -72,12 +79,16 @@ resource "oci_core_instance" "instance" {
   }
 
   dynamic "agent_config" {
-    for_each = var.enable_run_command_plugin ? [1] : []
+    for_each = length(local.enabled_agent_plugins) > 0 ? [1] : []
 
     content {
-      plugins_config {
-        desired_state = "ENABLED"
-        name          = "Compute Instance Run Command"
+      dynamic "plugins_config" {
+        for_each = local.enabled_agent_plugins
+
+        content {
+          desired_state = "ENABLED"
+          name          = plugins_config.value
+        }
       }
     }
   }

@@ -344,21 +344,92 @@ O script `pre-destroy.sh` é chamado automaticamente pelo `destroy` e limpa:
 
 A tenancy não tem mais IP residencial fixo, então `ssh_allowed_cidr` da unit `network/vcn` é `0.0.0.0/0`. O que substitui a restrição por CIDR:
 
-- porta alta — `ssh_port = 62222` na security list, `local.ssh_port` no user_data da VM e `SSH_PORT` no `deploy.sh`; **os três precisam bater**;
+- porta alta — `ssh_port` na security list (`network/vcn`), `local.ssh_port` no user_data da VM (que libera o iptables) e `HARDENED_SSH_PORT` no `deploy.sh`; **os três precisam bater**;
 - `PasswordAuthentication no` + `PermitRootLogin no` via drop-in `/etc/ssh/sshd_config.d/99-regulus.conf`;
 - Cowrie ocupando a 22 como sensor.
 
 Porta alta é ofuscação, não controle de acesso: ela corta varredura automatizada, não alvo dirigido. Quem protege de fato é a autenticação só por chave.
 
-**Não há canal de recuperação fora do SSH.** O plugin Compute Instance Run Command não é exposto nesta instância (a API responde `not present`) — por isso o `configure_regulus_host` do `deploy.sh` foi movido para SSH. Se o sshd subir na porta errada, a saída é recriar a VM, não consertá-la de fora.
+#### A VM nasce na 22; quem troca a porta é o deploy.sh
 
-**Ubuntu 24.04 usa socket activation no sshd.** Com `ssh.socket` habilitado, quem define a porta é o `ListenStream` da unit e a diretiva `Port` do `sshd_config` é *silenciosamente ignorada*. Por isso o user_data escreve `/etc/systemd/system/ssh.socket.d/override.conf` com `ListenStream=` vazio (para limpar a 22 herdada) seguido da porta nova. Trocar a porta só pelo `sshd_config` deixa o serviço na 22.
+**Nunca mova a porta do sshd no cloud-init.** A VM sobe com o sshd na 22, e o `harden_ssh_port` do `deploy.sh` faz a troca no fim do deploy — depois do cluster de pé, **antes** do `deploy_root_app` (o Cowrie usa `hostPort: 22` e disputaria a porta com o sshd).
+
+O motivo é uma falha real, em 02/09/2026, que custou duas VMs até a causa aparecer.
+
+**A causa raiz: `ListenStream=<porta>` sem endereço abre socket só em IPv6.** Nesta imagem, `ListenStream=62222` produz apenas `[::]:62222` — nenhum socket IPv4. Confirmado com `systemctl show ssh.socket -p Listen`. Todo o resto foi consequência:
+
+- conexões IPv4 morriam com **`No route to host`**, sintoma idêntico ao de firewall bloqueando — o que levou a acusar o `iptables` duas vezes, sendo que ele estava correto (regra `ACCEPT` presente, contador subindo, `REJECT` final com zero pacotes);
+- o check `ss -lnt | grep ":62222 "` **casava com a linha do IPv6** e reportava sucesso: validava localmente uma porta que ninguém conseguia acessar;
+- reboot nunca ajudava, porque o override defeituoso estava em disco.
+
+O teste que desempatou: subir um listener genérico com `bind` em `0.0.0.0` na mesma porta. Ele respondeu de fora na hora — provando que rede, security list e iptables sempre estiveram certos, e que o problema era só do sshd.
+
+Por isso o override do socket declara **as duas famílias explicitamente**:
+
+```ini
+[Socket]
+ListenStream=
+ListenStream=0.0.0.0:62222
+ListenStream=[::]:62222
+```
+
+A lição não é "faltou um detalhe no script": é que **dentro da VM não dá para provar alcançabilidade externa**. `ss -lnt` diz que algo escuta localmente, não em qual família de endereços nem se alguém alcança. Por isso o `harden_ssh_port`:
+
+1. sobe um **listener descartável** na porta alta e conecta nele de fora — não tenta deduzir nada da mensagem de erro do TCP, que não distingue "sem processo" de "bloqueado";
+2. arma um **dead man's switch** na VM (`systemd-run --on-active=180`) que apaga os drop-ins e devolve o sshd para a 22 sozinho;
+3. escreve o drop-in e o override do socket (com as duas famílias) e reinicia;
+4. **valida conectando de fora** na porta nova, com o SSH real;
+5. só então **desarma o timer**. Se a validação falhar, ninguém precisa agir: a VM se conserta em 3 minutos.
+
+O passo 2 existe porque a primeira versão revertia de fora, por SSH na 22 — **a mesma porta que a troca derruba**. Quando precisou reverter, encontrou `No route to host` e a VM ficou inacessível. Canal de recuperação que depende do que a mudança quebra não é canal de recuperação.
+
+Corolário: mudanças que podem cortar o próprio acesso devem ser testadas numa VM descartável antes de tocar na que hospeda o cluster.
+
+#### Canais de recuperação (leia antes de precisar)
+
+- **Compute Instance Run Command: não funciona nesta imagem.** O `agent_config` pede ENABLED, mas o agente do Ubuntu aarch64 não expõe o plugin — `oci instance-agent plugin list` devolve 10 plugins e nenhum é ele; a API responde `not present`. Não é policy nem configuração. Em Oracle Linux vem de fábrica.
+- **Bastion: suportado** (aparece como `STOPPED`, não `NOT_SUPPORTED`). Habilitado via `enable_bastion_plugin` no atom. Ressalva: o Bastion alcança a VM pela rede da VCN, então um iptables que barre a porta barra o Bastion também.
+- **O próprio K3s, enquanto a 6443 responder.** Foi o que recuperou a VM em 02/09/2026 sem destruí-la: o cluster roda no host, então um pod privilegiado com `nsenter` no PID 1 dá root nele. Vale quando o SSH caiu mas a API sobreviveu — que é exatamente o caso de uma porta de sshd mal configurada:
+
+```bash
+kubectl run ssh-fix --image=busybox:1.36 --restart=Never --attach --rm \
+  --overrides='{"spec":{"hostPID":true,"hostNetwork":true,"containers":[{"name":"ssh-fix","image":"busybox:1.36","securityContext":{"privileged":true},"command":["nsenter","--target","1","--mount","--uts","--ipc","--net","--pid","--","sh","-c","<comandos>"]}]}}'
+```
+
+- **Console serial: o único canal out-of-band de verdade.** Funciona no nível do hipervisor, independe de sshd, iptables, security list e do cluster. Não é criado pelo Terraform; crie sob demanda — e note que ele **só aceita chave RSA**, não ed25519:
+
+```bash
+ssh-keygen -t rsa -b 2048 -N "" -f /tmp/console_key
+oci compute instance-console-connection create \
+  --instance-id "$(cd oci/tenancy/regulus/us_ashburn_1/applications/compute/vm && terragrunt output -raw instance_id)" \
+  --ssh-public-key-file /tmp/console_key.pub --wait-for-state ACTIVE
+```
+
+Para obter shell sem senha (a cloud image não define uma para `ubuntu`), é preciso interromper o GRUB no boot e usar `init=/bin/bash`.
+
+#### Armadilhas do Ubuntu 24.04 e do heredoc
+
+**Socket activation no sshd.** Com `ssh.socket` habilitado — e nesta imagem ele está —, quem define a porta é o `ListenStream` da unit; a diretiva `Port` do `sshd_config` é *silenciosamente ignorada*. O override em `/etc/systemd/system/ssh.socket.d/override.conf` precisa de `ListenStream=` vazio (zera a 22 herdada) **e das duas famílias de endereço explícitas** — ver a causa raiz acima. Há ainda um segundo drop-in em `/run/systemd/generator/ssh.socket.d/addresses.conf`; `systemctl status ssh.socket` mostra os dois.
+
+**Ao diagnosticar porta que "não responde", nunca confie em `ss -lnt | grep ":<porta> "`.** Esse grep casa com `[::]:<porta>` e não distingue IPv4 de IPv6. Use `systemctl show ssh.socket -p Listen`, ou `ss -lnt` lendo a coluna de endereço, ou — melhor — teste de fora.
 
 **Nunca use heredoc aninhado no user_data.** O script vive dentro de um heredoc `<<-EOF` do HCL, que corta a menor indentação comum do bloco. Um heredoc de shell exige tabs, e um tab (1 caractere) faz o HCL passar a cortar 1 caractere em vez de 4 — o `#!/bin/bash` sai indentado e o cloud-init ignora o script inteiro, sem erro visível. Use `printf '%s\n'`.
 
-Ordem obrigatória: o sshd sai da 22 **antes** de o Cowrie subir. Os dois disputam a porta e o DNAT do `hostPort` vence.
+Para falar com uma VM que ainda esteja na 22: `REGULUS_SSH_PORT=22 bash deploy.sh <modo>`.
 
-Para falar com uma VM antiga que ainda esteja na 22: `REGULUS_SSH_PORT=22 bash deploy.sh <modo>`.
+#### Honeypot Cowrie (namespace `honeypot`)
+
+Deployment com `hostPort: 22` → `containerPort: 2222`, imagem pinada por digest, egress cortado por NetworkPolicy e PVC do Longhorn em `/cowrie/cowrie-git/var` guardando as capturas. Logs vão para stdout, então o `vlagent` já os leva ao VictoriaLogs — dá para consultar no Grafana sem configurar nada.
+
+**O PVC cobre a árvore que a imagem traz em `var/`.** Sem recriá-la, `var/log/cowrie` e `var/lib/cowrie` não existem, e o Cowrie **trava no momento do login** — que é quando abre o `cowrie.json` e o `ttylog`. Por isso o `initContainer prepare-var`. Ao mudar o mount de `var/`, confira a árvore.
+
+**O modo de falha é traiçoeiro: tudo fica verde.** Banner responde, cripto negocia, o servidor anuncia `publickey,password`, o pod segue `1/1 Running` e a Application `Synced/Healthy` — com o honeypot inutilizável. A causa é a readiness probe ser TCP na 2222, e TCP ser justamente a única camada que funcionava. Foi descoberto tentando usar, não pelos checks.
+
+**Ao validar o Cowrie, sempre faça um login de verdade** (`paramiko` ou `ssh` com senha) e execute um comando. Ver banner ou porta aberta não prova nada — só que o processo subiu. Vale trocar a probe por uma que exercite o login; enquanto isso não for feito, este modo de falha volta em silêncio.
+
+Credenciais: `userdb.txt` aceita quase tudo, negando `root:root` e `root:123456` de propósito — bot testa essas em massa e negá-las torna o honeypot mais crível. O `hostname` e o `version` do `cowrie.cfg` fingem um Debian x86_64: entregar Ubuntu ARM real ajudaria o atacante a escolher o binário certo.
+
+Confirmado em produção: o `hostPort` **preserva o IP de origem** do atacante (não vira IP do node), que é o que torna a captura útil.
 
 ### Deploy Script — Metodologia de Correção
 
@@ -391,6 +462,18 @@ Para falar com uma VM antiga que ainda esteja na 22: `REGULUS_SSH_PORT=22 bash d
 12. **`pre-destroy.sh` com IP hardcoded** — IP antigo da VM ficou hardcoded no script. Fix: obter IP dinamicamente via `terragrunt output -raw instance_public_ip` com fallback se VM não existir.
 
 13. **Plugin `Compute Instance Run Command` inexistente** — `configure_regulus_host` esperava o plugin ficar `RUNNING`, mas a API responde `400 Plugin ... not present for instance`. O erro era engolido por `2>/dev/null || true` e o laço exibia "status indisponivel" por 60 tentativas. Fix: configurar o host por SSH (o Terraform já injeta `ssh_authorized_keys`), eliminando a dependência do agente.
+
+14. **`Backend configuration changed` em qualquer unit** — o `.terragrunt-cache` guarda a config de backend de quando foi gerado; quando a cópia local envelhece em relação ao repositório, o Terraform recusa `apply`/`destroy`/`plan` e o `-auto-approve` não tem como responder. Bateu em `vcn`, `compute/vm` e `helms` no mesmo dia. Na `helms` o `|| true` engoliu a falha e o destroy dos releases não aconteceu, deixando o state apontando para um cluster destruído. Fix: função `tg_init` (`terragrunt init -reconfigure`) chamada antes de cada `apply`/`destroy`/`plan`. O state real vive no S3, então reconfigurar o backend local é inofensivo.
+
+15. **`k3s-uninstall.sh` travando o destroy para sempre** — o uninstall roda `umount -f` nos mounts CSI do Longhorn; se o `longhorn-manager` já morreu, o `umount` entra em estado `D` (sono ininterrompível, imune a SIGKILL) e o comando **nunca retorna** — o `|| echo` do script jamais dispara. Observado: 28 minutos parado a um passo de destruir a VM. Fix: `timeout 300` no `ssh`. O uninstall é best-effort de qualquer forma — quem remove o cluster de fato é o destroy da instância logo abaixo.
+
+16. **Mover a porta do sshd no cloud-init** — descrito em detalhe na seção *Acesso SSH da Regulus*. Resumo: `ListenStream=<porta>` sem endereço abriu socket só em IPv6, o check `ss -lnt | grep` casou com a linha IPv6 e passou, e a VM ficou inacessível por IPv4 nas duas portas. Fix: override com `0.0.0.0:` e `[::]:` explícitos, troca movida do user_data para o `harden_ssh_port` do `deploy.sh`, que prova a porta com um listener descartável antes de mexer no sshd.
+
+17. **Rollback pelo canal que a própria mudança derruba** — o `harden_ssh_port` revertia por SSH na 22, mas a troca de porta mata a 22 no ato; quando a validação falhou, o rollback encontrou `No route to host` e a VM ficou inacessível. Fix: dead man's switch (`systemd-run --on-active=180`) armado **antes** da troca e desarmado só após validação bem-sucedida — a VM se conserta sozinha, sem depender de rede nem de operador.
+
+18. **PVC vazio montado sobre diretório que a imagem popula** — o volume do Cowrie cobria `var/`, e o honeypot travava no login sem que nenhum indicador acusasse: pod `Running`, app `Synced/Healthy`, banner respondendo. Fix: `initContainer` recriando a árvore. Ver a seção do honeypot acima — a lição vale para qualquer chart/manifesto que monte volume sobre diretório preenchido pela imagem.
+
+**Um fio comum aos itens 16, 17 e 18: verificação que mede a camada errada.** `ss -lnt | grep ":porta "` casa com IPv6 e não prova alcançabilidade; probe TCP não prova que o serviço funciona; `Synced/Healthy` não prova que o workload faz o que deveria. Todos os três passaram enquanto o sistema estava quebrado. Quando o custo de errar é perder acesso ou perder captura, **teste o caminho completo de fora**, como um usuário faria.
 
 14. **Host key mudando no IP reservado** — a VM é recriada sobre o mesmo IP, então a host key muda a cada deploy e a entrada antiga em `known_hosts` atrapalha. Fix: `SSH_OPTS` central com `UserKnownHostsFile=/dev/null`, usado pelas quatro conexões SSH do script.
 

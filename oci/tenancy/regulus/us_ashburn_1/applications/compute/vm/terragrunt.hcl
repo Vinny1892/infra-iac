@@ -11,8 +11,10 @@ locals {
   k3s_dns_name = "k3s.vinny.dev.br"
   k3s_version  = "v1.36.4+k3s1"
 
-  # SSH real fora da 22: a 22 fica livre para o honeypot (Cowrie, hostPort 22).
-  # Precisa bater com ssh_port da unit network/vcn e com SSH_PORT do deploy.sh.
+  # Porta definitiva do SSH. Aqui ela serve so para liberar o iptables: o sshd
+  # nasce na 22 e quem faz a troca e o harden_ssh_port do deploy.sh, no fim do
+  # deploy. Precisa bater com ssh_port da unit network/vcn e com
+  # HARDENED_SSH_PORT do deploy.sh.
   ssh_port = 62222
 }
 
@@ -60,11 +62,15 @@ inputs = {
 
   # Volume dedicado ao Longhorn. Boot (47 GB) + dados (100 GB) permanecem
   # abaixo dos 200 GB combinados da franquia Always Free desta tenancy.
-  data_volume_size_in_gbs   = 100
-  data_volume_display_name  = "vm-regulus-longhorn"
-  data_volume_vpus_per_gb   = 10
-  data_volume_device        = "/dev/oracleoci/oraclevdb"
+  data_volume_size_in_gbs  = 100
+  data_volume_display_name = "vm-regulus-longhorn"
+  data_volume_vpus_per_gb  = 10
+  data_volume_device       = "/dev/oracleoci/oraclevdb"
+  # Run Command fica pedido, mas o agente do Ubuntu aarch64 nao entrega o
+  # plugin — ver a descricao da variavel no atom. O Bastion, esse sim, e
+  # suportado, e e o canal de acesso que nao depende de porta publica.
   enable_run_command_plugin = true
+  enable_bastion_plugin     = true
 
   reserved_public_ip_id      = dependency.reserved_ip.outputs.public_ip_id
   reserved_public_ip_address = dependency.reserved_ip.outputs.public_ip_address
@@ -82,61 +88,19 @@ inputs = {
 
     SSH_PORT="${local.ssh_port}"
 
-    # Antes de qualquer coisa que dependa de rede: se o K3s falhar mais adiante,
-    # o acesso administrativo ja esta de pe na porta nova. Importa mais aqui do
-    # que pareceria, porque o plugin Compute Instance Run Command nao e exposto
-    # nesta instancia — nao ha canal de recuperacao fora do SSH.
+    # A VM nasce com o sshd na 22 de proposito. Mover a porta aqui foi tentado e
+    # deu errado: a VM subiu com K3s funcionando e ficou inacessivel por SSH nas
+    # duas portas — a 22 rejeitada (ninguem escutando) e a 62222 rejeitada pelo
+    # iptables ou escutando so em IPv6; a causa nunca foi isolada, porque
+    # diagnosticar exigia justamente o acesso que havia se perdido. Sem o plugin
+    # Compute Instance Run Command nesta imagem, o unico caminho de volta era
+    # console serial, e a VM teve de ser recriada.
     #
-    # Drop-in em vez de sed no sshd_config: o arquivo principal do Ubuntu comeca
-    # com Include /etc/ssh/sshd_config.d/*.conf, e o cloud-image ja despeja
-    # ajustes proprios ali. Editar o arquivo principal a mao entra em disputa
-    # com esses drop-ins.
-    echo "==> Movendo o sshd para a porta $SSH_PORT"
-    install -d -m 755 /etc/ssh/sshd_config.d
-    # printf, e nao heredoc: este script inteiro ja vive dentro de um heredoc
-    # do HCL. Um heredoc aninhado exigiria tabs de indentacao, e o <<- do HCL
-    # corta a menor indentacao comum do bloco — com um tab no meio, ele passaria
-    # a cortar 1 caractere em vez de 4 e o shebang da primeira linha sairia
-    # indentado, fazendo o cloud-init ignorar o script todo.
-    printf '%s\n' \
-      "Port $SSH_PORT" \
-      "PermitRootLogin no" \
-      "PasswordAuthentication no" \
-      "KbdInteractiveAuthentication no" \
-      "PubkeyAuthentication yes" \
-      > /etc/ssh/sshd_config.d/99-regulus.conf
-
-    # Ubuntu 24.04 entrega o sshd com socket activation: quando ssh.socket esta
-    # habilitado, quem decide a porta e o ListenStream da unit, e a diretiva
-    # Port do sshd_config e simplesmente ignorada. Sem este override, o servico
-    # continuaria na 22 — que a partir daqui pertence ao honeypot.
-    if systemctl is-enabled --quiet ssh.socket 2>/dev/null; then
-      echo "  ssh.socket ativo: sobrescrevendo ListenStream"
-      install -d -m 755 /etc/systemd/system/ssh.socket.d
-      # ListenStream= vazio primeiro: sem essa linha o systemd soma a porta nova
-      # a 22 herdada da unit original, em vez de substitui-la.
-      printf '%s\n' "[Socket]" "ListenStream=" "ListenStream=$SSH_PORT" \
-        > /etc/systemd/system/ssh.socket.d/override.conf
-      systemctl daemon-reload
-      systemctl restart ssh.socket
-    else
-      sshd -t
-      systemctl restart ssh
-    fi
-
-    echo "==> Conferindo que o sshd respondeu na porta $SSH_PORT"
-    for i in $(seq 1 30); do
-      if ss -lnt | grep -q ":$SSH_PORT "; then
-        echo "  sshd escutando em $SSH_PORT"
-        break
-      fi
-      echo "  tentativa $i/30 — sshd ainda nao escuta em $SSH_PORT, aguardando 2s..."
-      sleep 2
-    done
-    ss -lnt | grep -q ":$SSH_PORT " || {
-      echo "ERRO: sshd nao subiu na porta $SSH_PORT"
-      exit 1
-    }
+    # A licao nao e "o script estava com bug", e sim que cloud-init e o lugar
+    # errado para essa mudanca: aqui nao ha como testar se a porta nova ficou
+    # alcancavel DE FORA, e `ss -lnt` so prova que algo escuta localmente. Quem
+    # troca a porta agora e o harden_ssh_port do deploy.sh, depois do cluster de
+    # pe, validando de fora e revertendo para a 22 se a validacao falhar.
 
     # O IP reservado e anexado a VNIC logo apos a criacao da instancia, o que
     # pode ocorrer depois do cloud-init comecar. Sem esperar a rota de saida,
@@ -192,10 +156,17 @@ inputs = {
     echo "==> Abrindo portas no iptables"
     # A imagem Ubuntu da OCI fecha a chain INPUT com um REJECT: liberar na
     # security list nao basta, a instancia tambem filtra.
+    #
+    # A porta alta e liberada aqui, ainda sem ninguem escutando nela. Isso deixa
+    # o firewall pronto antes de o harden_ssh_port mexer no sshd, e serve de
+    # diagnostico: com a regra ativa e o sshd ainda na 22, um teste na porta
+    # alta deve responder "connection refused". Se responder "no route to host"
+    # (ICMP host-prohibited), quem esta barrando e o iptables, e o harden aborta
+    # antes de tocar no sshd.
     iptables -I INPUT -p tcp --dport "$SSH_PORT" -j ACCEPT
-    # A 22 ja vem liberada na imagem, mas a regra e explicitada porque agora ela
-    # serve o honeypot, nao o sshd — quem ler isto depois precisa saber que a
-    # porta continua aberta de proposito.
+    # A 22 ja vem liberada na imagem, mas a regra e explicitada porque ela passa
+    # a servir o honeypot depois que o sshd sai — quem ler isto precisa saber
+    # que a porta continua aberta de proposito.
     iptables -I INPUT -p tcp --dport 22   -j ACCEPT
     iptables -I INPUT -p tcp --dport 6443 -j ACCEPT
     iptables -I INPUT -p tcp --dport 80   -j ACCEPT

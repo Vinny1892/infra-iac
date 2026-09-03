@@ -139,7 +139,32 @@ variable "data_volume_device" {
 }
 
 variable "enable_run_command_plugin" {
-  description = "Habilita o plugin Compute Instance Run Command do Oracle Cloud Agent."
+  description = <<-DESC
+    Habilita o plugin Compute Instance Run Command do Oracle Cloud Agent.
+
+    Atencao: pedir ENABLED aqui nao garante o plugin. Nas imagens Ubuntu aarch64
+    da OCI o agente nao expoe "Compute Instance Run Command" — `oci
+    instance-agent plugin list` devolve dez plugins e nenhum e esse, e qualquer
+    comando responde "not present". Nao adianta policy nem agent_config: o
+    plugin teria de ser instalado dentro da VM. Em Oracle Linux ele vem de
+    fabrica. Confira com `oci instance-agent plugin list` antes de contar com
+    ele como caminho de recuperacao.
+  DESC
+  type        = bool
+  default     = false
+}
+
+variable "enable_bastion_plugin" {
+  description = <<-DESC
+    Habilita o plugin Bastion do Oracle Cloud Agent, que permite sessoes
+    gerenciadas do servico OCI Bastion sem expor porta publica.
+
+    Diferente do Run Command, este plugin e suportado nas imagens Ubuntu aarch64
+    (aparece como STOPPED, nao NOT_SUPPORTED). Nao e um canal totalmente
+    out-of-band: o Bastion alcanca a instancia pela rede da VCN, entao um
+    iptables que barre a porta tambem barra o Bastion. Para falha real de rede
+    no host, o unico caminho e o console serial.
+  DESC
   type        = bool
   default     = false
 }

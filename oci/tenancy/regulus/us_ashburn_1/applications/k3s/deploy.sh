@@ -7,10 +7,15 @@ OCI_UNIT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"  # us_ashburn_1/
 SSH_KEY_REF="op://Personal/Pessoal/private key?ssh-format=openssh"
 SSH_PUBLIC_KEY_REF="op://Personal/Pessoal/public key"
 SSH_KEY=""
-# Precisa bater com local.ssh_port da unit applications/compute/vm e com
-# ssh_port da unit network/vcn. A 22 pertence ao honeypot.
-# Para falar com uma VM antiga, ainda na 22: REGULUS_SSH_PORT=22 bash deploy.sh
-SSH_PORT="${REGULUS_SSH_PORT:-62222}"
+# Porta usada durante o bootstrap. A VM nasce com o sshd na 22; so no fim do
+# deploy, com o cluster de pe, o harden_ssh_port move para HARDENED_SSH_PORT e
+# atualiza esta variavel. Assim nenhuma etapa do deploy depende de uma porta que
+# ainda nao foi comprovada alcancavel.
+SSH_PORT="${REGULUS_SSH_PORT:-22}"
+
+# Porta definitiva do SSH. Precisa bater com ssh_port da unit network/vcn e com
+# local.ssh_port da unit applications/compute/vm (que libera o iptables).
+HARDENED_SSH_PORT="${REGULUS_HARDENED_SSH_PORT:-62222}"
 SSH_USER="ubuntu"
 KUBECONFIG_PATH="${K3S_OCI_KUBECONFIG:-$HOME/.kube/k3s-oci.yaml}"
 TEMP_SSH_KEY=""
@@ -42,15 +47,28 @@ get_vm_ip() {
   terragrunt output -raw instance_public_ip 2>/dev/null
 }
 
+# O .terragrunt-cache guarda a config de backend de quando foi gerado. Quando a
+# copia local fica velha em relacao ao repositorio, o terraform recusa qualquer
+# comando com "Backend configuration changed" e o -auto-approve nao tem como
+# responder. Ja custou o destroy dos helm releases uma vez: o `|| true` engoliu
+# a falha e o state seguiu com releases apontando para um cluster destruido.
+# O state real vive no S3, entao reconfigurar o backend local e inofensivo.
+tg_init() {
+  terragrunt init -reconfigure --non-interactive >/dev/null
+}
+
 provision_vm() {
   echo "==> Provisionando VM (user_data instala K3s automaticamente)..."
   cd "$OCI_UNIT_DIR/network/vcn"
+  tg_init
   terragrunt apply --auto-approve
   # IP reservado precisa existir antes da VM: seu endereco entra no user_data
   # (--tls-san) e e anexado a VNIC apos a criacao da instancia.
   cd "$OCI_UNIT_DIR/network/reserved_ip"
+  tg_init
   terragrunt apply --auto-approve
   cd "$OCI_UNIT_DIR/applications/compute/vm"
+  tg_init
   terragrunt apply --auto-approve
 }
 
@@ -68,6 +86,142 @@ configure_regulus_host() {
   ssh -i "$SSH_KEY" -p "$SSH_PORT" $SSH_OPTS "$SSH_USER@$vm_ip" \
     "printf '%s' '$script_b64' | base64 --decode | sudo REGULUS_SSH_PUBLIC_KEY_B64='$public_key_b64' bash"
   echo "Host Regulus configurado."
+}
+
+# Move o sshd da 22 para a porta alta, liberando a 22 para o honeypot.
+#
+# Roda no fim do deploy, e nao no cloud-init, por uma razao aprendida do jeito
+# caro: dentro da VM nao da para saber se a porta nova ficou alcancavel de fora.
+# Uma tentativa anterior conferia com `ss -lnt`, viu a porta escutando, seguiu
+# adiante — e a VM ficou inacessivel nas duas portas, sem Run Command para
+# resgatar. Aqui o teste e feito do lado de fora, contra o IP publico, e ha para
+# onde voltar se ele falhar.
+harden_ssh_port() {
+  local vm_ip="$1"
+  local ssh_base="ssh -i $SSH_KEY -p $SSH_PORT $SSH_OPTS $SSH_USER@$vm_ip"
+
+  if [ "$SSH_PORT" = "$HARDENED_SSH_PORT" ]; then
+    echo "==> SSH ja esta na porta $HARDENED_SSH_PORT; nada a fazer."
+    return 0
+  fi
+
+  # Antes de tocar no sshd, provar que a porta alta e alcancavel de fora — com
+  # um listener descartavel, nao por inferencia.
+  #
+  # A versao anterior tentava deduzir isso da mensagem de erro do TCP: tratava
+  # "connection refused" como caminho livre e "No route to host" como iptables
+  # barrando. Errado. Nesta VM uma porta liberada e SEM listener responde
+  # "No route to host", e o teste abortava um caminho que estava perfeito.
+  # Mensagem de erro de porta fechada nao distingue "sem processo" de
+  # "bloqueado"; so um processo aceitando conexao distingue.
+  echo "==> Provando que a porta $HARDENED_SSH_PORT e alcancavel de fora..."
+  $ssh_base "nohup setsid timeout 60 python3 -c \"import socket;s=socket.socket();s.setsockopt(1,2,1);s.bind(('0.0.0.0',$HARDENED_SSH_PORT));s.listen(1);c,_=s.accept();c.send(b'PROBE-OK');c.close()\" >/dev/null 2>&1 < /dev/null &" \
+    || { echo "ERROR: nao foi possivel subir o listener de teste na VM."; return 1; }
+  sleep 5
+
+  local probe=""
+  local i
+  for i in $(seq 1 6); do
+    probe=$(timeout 10 bash -c "exec 3<>/dev/tcp/$vm_ip/$HARDENED_SSH_PORT; head -c 8 <&3" 2>/dev/null || true)
+    [ "$probe" = "PROBE-OK" ] && break
+    sleep 3
+  done
+
+  if [ "$probe" != "PROBE-OK" ]; then
+    echo "ERROR: a porta $HARDENED_SSH_PORT nao respondeu nem com um listener ativo."
+    echo "  Algo no caminho barra a porta: security list, iptables da VM ou rota."
+    echo "  O sshd continua na 22 e o cluster segue acessivel; corrija o caminho"
+    echo "  de rede antes de tentar de novo."
+    return 1
+  fi
+  echo "  porta $HARDENED_SSH_PORT alcancavel; seguindo com a troca."
+
+  # Dead man's switch: agenda a reversao DENTRO da VM antes de mexer no sshd.
+  #
+  # A versao anterior revertia de fora, por SSH na 22 — a mesma porta que a
+  # troca derruba no instante em que e aplicada. Quando precisou reverter,
+  # encontrou "No route to host" e a VM ficou inacessivel. Um canal de
+  # recuperacao que depende do que a mudanca quebra nao e canal de recuperacao.
+  #
+  # Agora a VM se conserta sozinha: se este script nao cancelar o timer em 3
+  # minutos, os drop-ins somem e o sshd volta para a 22, sem depender de rede,
+  # de SSH ou de o operador estar por perto.
+  echo "==> Armando rollback automatico na VM (3 min)..."
+  $ssh_base "sudo systemd-run --unit=ssh-rollback --on-active=180 \
+    /bin/sh -c 'rm -f /etc/ssh/sshd_config.d/99-regulus.conf /etc/systemd/system/ssh.socket.d/override.conf; systemctl daemon-reload; systemctl restart ssh.socket 2>/dev/null || systemctl restart ssh'" \
+    || { echo "ERROR: nao foi possivel armar o rollback; abortando com a 22 intacta."; return 1; }
+
+  echo "==> Movendo o sshd para a porta $HARDENED_SSH_PORT..."
+  # Drop-in em vez de editar sshd_config: o arquivo principal do Ubuntu abre com
+  # Include /etc/ssh/sshd_config.d/*.conf e o cloud-image ja escreve ali.
+  #
+  # O override do ssh.socket e obrigatorio no Ubuntu 24.04: com socket
+  # activation, a porta vem do ListenStream da unit e a diretiva Port do
+  # sshd_config e ignorada sem aviso. O ListenStream= vazio zera a 22 herdada;
+  # sem ele o systemd soma as duas portas.
+  $ssh_base "sudo bash -s" <<REMOTE
+set -euo pipefail
+install -d -m 755 /etc/ssh/sshd_config.d
+printf '%s\n' \
+  "Port $HARDENED_SSH_PORT" \
+  "PermitRootLogin no" \
+  "PasswordAuthentication no" \
+  "KbdInteractiveAuthentication no" \
+  "PubkeyAuthentication yes" \
+  > /etc/ssh/sshd_config.d/99-regulus.conf
+sshd -t
+if systemctl is-enabled --quiet ssh.socket 2>/dev/null; then
+  install -d -m 755 /etc/systemd/system/ssh.socket.d
+  # As duas familias precisam ser declaradas EXPLICITAMENTE.
+  #
+  # "ListenStream=<porta>" sozinho parece dual-stack, mas nesta imagem produz
+  # apenas "[::]:<porta>" — so IPv6. Toda conexao IPv4 morre e o sintoma externo
+  # e "No route to host", indistinguivel de firewall. Pior: "ss -lnt | grep
+  # ':<porta> '" casa com a linha do IPv6 e reporta sucesso, entao qualquer
+  # verificacao local passa enquanto ninguem consegue conectar. Foram duas VMs
+  # perdidas ate isto aparecer em "systemctl show ssh.socket -p Listen".
+  printf '%s\n' "[Socket]" "ListenStream=" \
+    "ListenStream=0.0.0.0:$HARDENED_SSH_PORT" \
+    "ListenStream=[::]:$HARDENED_SSH_PORT" \
+    > /etc/systemd/system/ssh.socket.d/override.conf
+  systemctl daemon-reload
+  systemctl restart ssh.socket
+else
+  systemctl restart ssh
+fi
+REMOTE
+
+  echo "==> Validando o SSH na porta $HARDENED_SSH_PORT (de fora)..."
+  local ok=false
+  local i
+  for i in $(seq 1 12); do
+    if ssh -i "$SSH_KEY" -p "$HARDENED_SSH_PORT" $SSH_OPTS "$SSH_USER@$vm_ip" true 2>/dev/null; then
+      ok=true
+      break
+    fi
+    echo "  tentativa $i/12 — ainda sem resposta em $HARDENED_SSH_PORT; aguardando 5s..."
+    sleep 5
+  done
+
+  if [ "$ok" = false ]; then
+    # Nada a fazer aqui alem de sair: o timer armado na VM devolve o sshd para a
+    # 22 sozinho. Tentar reverter de fora seria justamente o erro anterior.
+    echo "AVISO: $HARDENED_SSH_PORT nao respondeu."
+    echo "  O rollback automatico na VM devolve o sshd para a 22 em ate 3 min."
+    echo "  Aguarde e tente 'ssh -p 22'; nao e preciso recriar a VM."
+    echo "ERROR: a mudanca de porta falhou. O honeypot NAO deve subir."
+    return 1
+  fi
+
+  # Só agora o timer pode ser desarmado: a porta nova esta comprovadamente
+  # respondendo de fora, com o SSH real e nao com um listener de teste.
+  echo "==> Porta validada; desarmando o rollback automatico..."
+  ssh -i "$SSH_KEY" -p "$HARDENED_SSH_PORT" $SSH_OPTS "$SSH_USER@$vm_ip" \
+    "sudo systemctl stop ssh-rollback.timer 2>/dev/null; sudo systemctl reset-failed ssh-rollback.timer 2>/dev/null; true" \
+    || echo "  AVISO: nao foi possivel desarmar o timer; o sshd pode voltar para a 22 em ate 3 min."
+
+  SSH_PORT="$HARDENED_SSH_PORT"
+  echo "SSH na porta $HARDENED_SSH_PORT confirmado; a 22 esta livre para o honeypot."
 }
 
 wait_for_k3s() {
@@ -120,6 +274,7 @@ fetch_kubeconfig() {
 cleanup_helms_state() {
   echo "==> Limpando state locks e helm releases pendentes..."
   cd "$SCRIPT_DIR/helms"
+  tg_init
 
   # Force-unlock any stuck state lock
   local lock_id
@@ -323,6 +478,7 @@ destroy() {
 
   echo "==> Destruindo helm releases..."
   cd "$SCRIPT_DIR/helms"
+  tg_init
   # Force-unlock before destroy too
   local lock_id
   lock_id=$(K3S_OCI_KUBECONFIG="$KUBECONFIG_PATH" terragrunt plan 2>&1 | grep -oP 'ID:\s+\K[a-f0-9-]+' | head -1) || true
@@ -348,15 +504,23 @@ destroy() {
   vm_ip=$(cd "$OCI_UNIT_DIR/applications/compute/vm" && get_vm_ip) || true
   if [ -n "${vm_ip:-}" ]; then
     echo "==> Desinstalando K3s na VM ($vm_ip)..."
-    ssh -i "$SSH_KEY" -p "$SSH_PORT" $SSH_OPTS \
+    # timeout: o k3s-uninstall.sh desmonta os mounts CSI do Longhorn com
+    # `umount -f`. Se o longhorn-manager ja morreu, esse umount fica em estado D
+    # — sono ininterrompivel, imune ate a SIGKILL — e o script nunca retorna.
+    # Sem o timeout o `|| echo` abaixo jamais dispara e o destroy trava para
+    # sempre a um passo de destruir a VM (visto na pratica: 28 min parado).
+    # O uninstall e best-effort de qualquer forma: quem remove o cluster de fato
+    # e o destroy da instancia, logo abaixo.
+    timeout 300 ssh -i "$SSH_KEY" -p "$SSH_PORT" $SSH_OPTS \
       "$SSH_USER@$vm_ip" "sudo /usr/local/bin/k3s-uninstall.sh" 2>/dev/null \
-      || echo "K3s nao instalado ou ja removido."
+      || echo "K3s nao instalado, ja removido, ou uninstall expirou (a VM sera destruida a seguir)."
   else
     echo "==> Pulando uninstall do K3s (IP da VM indisponivel)."
   fi
 
   echo "==> Destruindo VM..."
   cd "$OCI_UNIT_DIR/applications/compute/vm"
+  tg_init
   terragrunt destroy --auto-approve || true
 }
 
@@ -373,6 +537,12 @@ case "$MODE" in
     deploy_helms
     bootstrap_backup_secrets
     restore_minecraft_data
+    # Obrigatoriamente antes do root app: o Cowrie sobe com hostPort 22 e
+    # disputaria a porta com o sshd. Se o harden falhar, ele reverte para a 22 e
+    # retorna erro — o set -e aborta aqui de proposito, deixando o cluster sem
+    # os apps mas com acesso administrativo intacto. Subir o honeypot com o sshd
+    # ainda na 22 seria a unica forma de perder as duas coisas ao mesmo tempo.
+    harden_ssh_port "$VM_IP"
     deploy_root_app
     verify
     ;;
