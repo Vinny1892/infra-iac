@@ -52,16 +52,44 @@ configure_longhorn_volume() {
   fi
 
   install -d -m 755 "$TEMP_MOUNT" "$LONGHORN_DIR"
-  mount "$DEVICE" "$TEMP_MOUNT"
+  # Idempotente: uma execucao anterior interrompida depois do mount deixa o
+  # dispositivo montado no TEMP_MOUNT, e `mount` de novo falharia com "already
+  # mounted" — derrubando o script pelo set -e.
+  if ! findmnt -rn -S "UUID=$volume_uuid" -T "$TEMP_MOUNT" >/dev/null 2>&1; then
+    mount "$DEVICE" "$TEMP_MOUNT"
+  else
+    echo "$DEVICE ja estava montado em $TEMP_MOUNT (execucao anterior)."
+  fi
 
-  # O Run Command roda fora do K3s, então pode parar o serviço para obter uma
-  # cópia consistente dos volumes antes de trocar o mount point.
-  until systemctl is-active --quiet k3s; do
-    echo "Aguardando o K3s ficar ativo antes da migracao..."
-    sleep 10
-  done
-  systemctl stop k3s
-  trap 'systemctl start k3s >/dev/null 2>&1 || true' EXIT
+  # Se houver K3s rodando, ele para para a copia sair consistente. Se nao
+  # houver, nao ha o que parar nem o que migrar.
+  #
+  # A versao anterior fazia `until systemctl is-active --quiet k3s` sem limite,
+  # e isso escondia duas suposicoes que deixaram de valer com o cluster em dois
+  # nodes:
+  #
+  #   1. que este script roda sempre no server. Na danebola ele roda ANTES do
+  #      join — o mount tem de existir antes do Longhorn — entao esperava por um
+  #      k3s que ainda nao existia, para sempre. Travou o deploy de 04/09/2026.
+  #   2. que o servico se chama `k3s`. No agent ele e `k3s-agent`, entao nem
+  #      depois do join a condicao bateria.
+  local k3s_unit=""
+  if systemctl is-active --quiet k3s; then
+    k3s_unit="k3s"
+  elif systemctl is-active --quiet k3s-agent; then
+    k3s_unit="k3s-agent"
+  fi
+
+  if [ -n "$k3s_unit" ]; then
+    echo "Parando $k3s_unit para copiar $LONGHORN_DIR de forma consistente..."
+    systemctl stop "$k3s_unit"
+    # shellcheck disable=SC2064 # expansao imediata e intencional: o trap tem de
+    # saber QUAL unit religar, mesmo se a variavel mudar depois.
+    trap "systemctl start $k3s_unit >/dev/null 2>&1 || true" EXIT
+  else
+    echo "Nenhum k3s ativo; nada a migrar (node novo)."
+  fi
+
   cp -a "$LONGHORN_DIR/." "$TEMP_MOUNT/"
   sync
   umount "$TEMP_MOUNT"
@@ -70,8 +98,11 @@ configure_longhorn_volume() {
   printf 'UUID=%s %s ext4 defaults,_netdev,nofail 0 2\n' \
     "$volume_uuid" "$LONGHORN_DIR" >> /etc/fstab
   mount "$LONGHORN_DIR"
-  systemctl start k3s
-  trap - EXIT
+
+  if [ -n "$k3s_unit" ]; then
+    systemctl start "$k3s_unit"
+    trap - EXIT
+  fi
 }
 
 install_ssh_key
