@@ -131,13 +131,30 @@ delete_operator_workload_crs() {
   #
   # Observado com o VictoriaLogs: o vlsingle renascia, o delete de PVCs expirava e
   # os volumes do Longhorn nunca drenavam. A CR precisa morrer antes do workload.
-  local kinds="vlsingle vlagent vlcluster vmsingle vmagent vmcluster vmalert vmalertmanager"
-  local kind encontrou=0
-  for kind in $kinds; do
-    $KUBECTL get crd "${kind}s.operator.victoriametrics.com" >/dev/null 2>&1 || continue
-    if [ -n "$($KUBECTL get "$kind" -A --no-headers 2>/dev/null || true)" ]; then
-      echo "  removendo CRs do tipo $kind"
-      $KUBECTL delete "$kind" --all -A --timeout=60s >/dev/null 2>&1 || true
+  # Recursos escritos como `plural.grupo` em vez de so o kind: a versao
+  # anterior montava o nome da CRD como "${kind}s.operator.victoriametrics.com",
+  # o que amarrava a funcao a UM operator. Quando o CloudNativePG entrou, a
+  # lista nao foi atualizada — e o Cluster do pg-teste sobreviveu ao destroy,
+  # o operator manteve o pod de pe e o PVC ficou Terminating para sempre.
+  # Exatamente o cenario que o comentario acima descreve, com outro operator.
+  local resources="
+    vlsingles.operator.victoriametrics.com
+    vlagents.operator.victoriametrics.com
+    vlclusters.operator.victoriametrics.com
+    vmsingles.operator.victoriametrics.com
+    vmagents.operator.victoriametrics.com
+    vmclusters.operator.victoriametrics.com
+    vmalerts.operator.victoriametrics.com
+    vmalertmanagers.operator.victoriametrics.com
+    scheduledbackups.postgresql.cnpg.io
+    clusters.postgresql.cnpg.io
+  "
+  local res encontrou=0
+  for res in $resources; do
+    $KUBECTL get crd "$res" >/dev/null 2>&1 || continue
+    if [ -n "$($KUBECTL get "$res" -A --no-headers 2>/dev/null || true)" ]; then
+      echo "  removendo CRs de $res"
+      $KUBECTL delete "$res" --all -A --timeout=60s >/dev/null 2>&1 || true
       encontrou=1
     fi
   done
