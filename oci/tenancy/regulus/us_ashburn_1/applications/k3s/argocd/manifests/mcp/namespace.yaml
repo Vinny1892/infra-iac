@@ -1,0 +1,11 @@
+# Namespace dos servidores MCP que o agente do mercurio consome.
+#
+# Um namespace comum para os dois (grafana e kubeshark) e nao um por MCP, por um
+# motivo pratico do Traefik: com `allowCrossNamespace` desligado — o default no
+# Traefik v3 — um Middleware so pode ser referenciado por Ingress do MESMO
+# namespace. Juntos, um Middleware de basic auth serve aos dois sem precisar
+# afrouxar essa configuracao do Traefik para o cluster inteiro.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: mcp

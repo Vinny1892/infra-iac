@@ -1,0 +1,33 @@
+# Basic auth do Traefik para os MCPs expostos na internet.
+#
+# Anexado a um Ingress pela anotacao:
+#   traefik.ingress.kubernetes.io/router.middlewares: mcp-basic-auth@kubernetescrd
+# O formato e `<namespace>-<nome>@kubernetescrd` — daí `mcp-basic-auth`, que é o
+# namespace `mcp` mais o nome `basic-auth`, e não um recurso chamado
+# "mcp-basic-auth".
+#
+# O que este middleware protege e o que ele NAO protege:
+#
+# - Ele exige credencial para cada requisicao, o que tira os MCPs de acesso
+#   anonimo. É o objetivo.
+# - Ele NAO limita tentativas. Basic auth sem rate limit aceita força bruta na
+#   velocidade que a rede permitir; o hash bcrypt com cost 12 é o que segura,
+#   custando ~250ms por tentativa. Se estes hosts começarem a aparecer em
+#   varredura, o próximo passo é um `rateLimit` na mesma cadeia de middlewares.
+# - Ele NAO dá atribuição: um usuário só, compartilhado. Não há como distinguir
+#   no log quem usou.
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: basic-auth
+  namespace: mcp
+spec:
+  basicAuth:
+    # O Secret precisa ter a chave `users` — o nome é fixo no Traefik, não há
+    # opção para mudá-lo. É por isso que o ExternalSecret usa `secretKey: users`:
+    # é contrato com o Traefik, não escolha nossa.
+    secret: mcp-basic-auth
+    # Remove o header Authorization antes de encaminhar. Sem isto, o MCP recebe
+    # a credencial do Traefik em toda requisição — e um MCP que loga headers
+    # passaria a gravar a senha nos logs, que vão para o VictoriaLogs.
+    removeHeader: true
