@@ -29,6 +29,24 @@ inputs = {
   ssh_port         = 62222
 
   additional_ingress_rules = [
+    # Tráfego interno da VCN, liberado por inteiro. Duas razões independentes:
+    #
+    # 1. O cluster de dois nodes precisa disso. O agent da danebola alcança a
+    #    API na 6443 só porque ela está aberta ao mundo — por acaso, não por
+    #    desenho. Mas 8472/udp (VXLAN do flannel) e 10250 (kubelet) não tinham
+    #    regra nenhuma: sem elas a rede pod-a-pod entre nodes não sobe, o
+    #    `kubectl logs` em pod da danebola falha e o Longhorn não replica entre
+    #    os nodes. O iptables das duas VMs já libera essas portas; quem barrava
+    #    era só a security list.
+    #
+    # 2. É o caminho de administração do mercurio. Ele fica em 10.20.1.x e
+    #    alcança regulus e danebola pelos IPs privados, sem depender de porta
+    #    aberta na internet.
+    #
+    # `protocol = "all"` e não uma lista de portas: enumerar as portas do k3s
+    # aqui seria uma segunda fonte da verdade para brigar com o iptables de cada
+    # host, que é onde a diferenciação por VM realmente acontece.
+    { source = "10.20.0.0/16", protocol = "all", description = "Trafego interno da VCN (k3s entre nodes + administracao pelo mercurio)" },
     { source = "0.0.0.0/0", protocol = "6", tcp_options = { min = 80, max = 80 } },
     { source = "0.0.0.0/0", protocol = "6", tcp_options = { min = 443, max = 443 } },
     # Minecraft Java. O RCON (25575) continua exclusivamente interno no K3s.

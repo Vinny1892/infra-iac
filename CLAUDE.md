@@ -338,6 +338,36 @@ O script `pre-destroy.sh` é chamado automaticamente pelo `destroy` e limpa:
 
 **Traefik** usa DaemonSet com `hostPort: 80/443` + service `LoadBalancer` (MetalLB publica o IP no Ingress status para o external-dns). Não usa redirect HTTP→HTTPS (incompatível com Cloudflare proxy Flexible SSL).
 
+### Mercúrio — a VM de administração (ex-Hermes)
+
+**O Hermes passou a se chamar `mercurio`.** O nome antigo ainda aparece na
+imagem (`nousresearch/hermes-agent`), no histórico do git e nos commits de
+04/09/2026; em tudo que é nosso, o nome é mercurio.
+
+Ele **saiu do k3s** e vive numa VM própria: `150.136.205.234` (IP reservado,
+estável entre recriações), 1 OCPU / 6 GB, IP privado `10.20.1.148`. Os
+manifests e a Application foram removidos do cluster — não existe mais nada de
+mercurio dentro do k3s.
+
+Sair do cluster teve preço: ele perdeu o backup do Longhorn para o S3, o
+certificado renovado pelo cert-manager e a reconciliação do GitOps. Os três
+precisam de substituto próprio, e o backup é o urgente — o `/opt/data` guarda
+`auth.json`, sessões e skills, que não são reconstruíveis a partir do
+repositório.
+
+**A intenção é que o mercurio administre este ambiente**: alterar a regulus e a
+danebola, aplicar mudanças, operar o cluster. Ele alcança as duas pelos IPs
+privados da VCN (a regra `10.20.0.0/16` na security list existe para isso, além
+do tráfego do k3s entre nodes).
+
+**O que isso significa para a superfície de ataque:** o mercurio roda um agente
+que executa comandos arbitrários em containers, com DinD como fronteira. Foi
+exatamente por isso que ele ganhou VM separada. Dar a ele credencial de
+administração das outras duas VMs devolve parte desse alcance — a fronteira
+deixa de ser "o agente não sai da VM dele" e passa a ser "o agente pode o que a
+credencial dele permite". Por isso a credencial deve ser **dedicada e escopada**,
+nunca a chave pessoal do vault `Personal` que o `deploy.sh` usa.
+
 ### Acesso SSH da Regulus e o honeypot na 22
 
 **O SSH real da `vm-regulus` fica na porta 62222. A porta 22 é do honeypot (Cowrie) e não dá acesso a nada.**
