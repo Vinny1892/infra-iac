@@ -111,8 +111,19 @@ provision_vm() {
 
 # IP publico da danebola. Separado de get_vm_ip porque as duas units tem
 # diretorios distintos e o output e lido no diretorio da unit.
+#
+# Valida o formato em vez de apenas testar se veio vazio: quando a unit nao tem
+# state, o terragrunt decora o erro no STDOUT, entao a substituicao de comando
+# captura moldura ANSI em vez de string vazia. Visto no destroy de 04/09/2026,
+# que anunciou "Desinstalando o k3s agent na danebola (╷" e gastou um ciclo de
+# SSH contra um host inexistente. Mesmo defeito do stdout poluido do
+# wait_for_k3s, com outra origem.
 get_danebola_ip() {
-  (cd "$OCI_UNIT_DIR/applications/compute/danebola" && terragrunt output -raw instance_public_ip 2>/dev/null)
+  local ip
+  ip=$( (cd "$OCI_UNIT_DIR/applications/compute/danebola" && terragrunt output -raw instance_public_ip 2>/dev/null) )
+  if [[ "$ip" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
+    echo "$ip"
+  fi
 }
 
 # Instala o k3s agent na danebola e a junta ao cluster.
