@@ -22,6 +22,20 @@ spec:
         # esta revisão no mesmo commit — é o que faz o ArgoCD recriar o pod.
         config-revision: "2"
     spec:
+      # Preso ao control plane desde o split do cluster em dois nós.
+      #
+      # O valor do honeypot está em receber varredura no IP reservado, que fica
+      # na vm-regulus. Solto, este pod pode ser agendado na danebola — e aí ele
+      # escuta numa porta 22 que ninguém ataca (o IP da danebola é efêmero e não
+      # está em DNS nenhum) e ainda disputa essa porta com o sshd de lá, que só
+      # sai da 22 no harden. O sintoma seria captura zerada com o pod Running e
+      # a Application Synced/Healthy — o mesmo modo de falha silenciosa que já
+      # custou o honeypot uma vez.
+      #
+      # Usa o label embutido do k3s no server em vez de um label proprio: um
+      # label a menos para alguem esquecer de aplicar num node novo.
+      nodeSelector:
+        node-role.kubernetes.io/control-plane: "true"
       securityContext:
         # A imagem declara User 999:999 e é o dono de /cowrie. O fsGroup faz o
         # Longhorn montar o volume com esse grupo — sem ele o PVC monta como

@@ -190,7 +190,11 @@ resource "helm_release" "longhorn" {
   values = [
     yamlencode({
       defaultSettings = {
-        defaultReplicaCount = 1
+        # 2 desde o split em vm-regulus + danebola, e tem de bater com
+        # argocd/values/longhorn.yaml: se divergirem, o selfHeal corrige depois
+        # do primeiro sync e a diferenca aparece como valor que "voltou sozinho"
+        # apos um apply bem-sucedido.
+        defaultReplicaCount = 2
         # Sem esta flag o job longhorn-uninstall se recusa a concluir e o
         # `terragrunt destroy` falha com BackoffLimitExceeded, deixando o
         # longhorn e o cert-manager (preso por depends_on) orfaos no state.
@@ -198,6 +202,15 @@ resource "helm_release" "longhorn" {
         # este cluster e recriado do zero a cada ciclo e nao guarda dado
         # persistente. NAO replicar em cluster com dado que importa.
         deletingConfirmationFlag = true
+      }
+
+      # A StorageClass criada pelo seed tambem precisa da contagem certa.
+      # Faltando isto, ela nasce com o default do chart — tres replicas — e todo
+      # PVC criado entre o seed e o primeiro sync do ArgoCD fica Degraded, sem
+      # onde por a terceira copia. O restore_minecraft_data do deploy.sh cria
+      # PVC exatamente nessa janela.
+      persistence = {
+        defaultClassReplicaCount = 2
       }
     })
   ]

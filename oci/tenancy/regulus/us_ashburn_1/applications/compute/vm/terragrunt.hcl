@@ -55,13 +55,36 @@ inputs = {
   subnet_id           = dependency.vcn.outputs.subnet_public[0].id
   instance_name       = "vm-regulus"
   shape               = "VM.Standard.A1.Flex"
-  ocpus               = 4
-  memory_in_gbs       = 24
+
+  # 2 OCPU / 8 GB apos o split. Esta VM deixou de ser o cluster inteiro e virou
+  # so o control plane mais a plataforma (argocd, monitoring, longhorn,
+  # cert-manager, ESO, metallb, traefik, postgres, cowrie, whoami). O Minecraft,
+  # que pede 7 GiB de request, mudou para a danebola — nao cabe aqui de
+  # proposito, e e o request dele que garante que ele nao volte por acidente.
+  #
+  # Conferido contra pico medido de 19h antes do split: overhead do node 3,2 GiB
+  # (k3s server 2,07 + DaemonSets 0,48 + instance-manager 0,33 + SO) mais ~3,5
+  # GiB da plataforma = 6,7 de 8. Folga de 1,3 GiB.
+  #
+  # A soma das tres VMs (2/8 aqui, 1/10 na danebola, 1/6 na hermes) fecha
+  # exatamente os 4 OCPU / 24 GB da franquia Always Free de A1.
+  ocpus               = 2
+  memory_in_gbs       = 8
   image_id            = local.region_vars.locals.image_id
   ssh_authorized_keys = run_cmd("--terragrunt-quiet", "op", "read", "op://Personal/Pessoal/public key")
 
-  # Volume dedicado ao Longhorn. Boot (47 GB) + dados (100 GB) permanecem
-  # abaixo dos 200 GB combinados da franquia Always Free desta tenancy.
+  # Volume dedicado ao Longhorn, formatado e montado em /var/lib/longhorn pelo
+  # configure-regulus-host.sh (via UUID no fstab), nao pelo cloud-init.
+  #
+  # ATENCAO: o split estourou a franquia de block storage. Boot (47) + dados
+  # (100) desta VM, mais os mesmos 147 GB da danebola, mais 47 GB de boot da
+  # hermes, dao 341 GB — 141 GB acima dos 200 GB gratuitos. E consequencia
+  # aceita de ter Longhorn com 2 replicas, que e o unico jeito de o cluster
+  # sobreviver a perda de um node com os dados intactos.
+  #
+  # Os 100 GB aqui e na danebola sao iguais de proposito: o Longhorn agenda
+  # replicas comparando espaco entre os discos, e disco assimetrico produz
+  # decisao de agendamento dificil de prever.
   data_volume_size_in_gbs  = 100
   data_volume_display_name = "vm-regulus-longhorn"
   data_volume_vpus_per_gb  = 10

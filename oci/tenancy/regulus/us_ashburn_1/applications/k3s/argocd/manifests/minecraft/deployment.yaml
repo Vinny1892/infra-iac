@@ -15,6 +15,17 @@ spec:
       labels:
         app: minecraft
     spec:
+      # Preso na danebola, o node escravo. O label vem do `--node-label` do
+      # join do agent, no deploy.sh.
+      #
+      # Sem isto, a colocacao dependeria apenas de o `requests: 7Gi` abaixo nao
+      # caber na vm-regulus (2 OCPU / 8 GB) — aritmetica de scheduler, que da o
+      # resultado certo hoje e quebra em silencio no dia em que alguem ajustar o
+      # request ou o tamanho de uma das VMs. O jogador nao perde acesso: o
+      # Traefik atende a 25565 no IP reservado da vm-regulus e o kube-proxy
+      # entrega no pod aqui.
+      nodeSelector:
+        workload: minecraft
       containers:
         - name: minecraft
           # Paper 26.1+ requer Java 25.
