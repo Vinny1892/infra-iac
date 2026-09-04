@@ -89,8 +89,8 @@ inputs = {
   reserved_public_ip_id      = dependency.reserved_ip.outputs.public_ip_id
   reserved_public_ip_address = dependency.reserved_ip.outputs.public_ip_address
 
-  # O user_data prepara a VM e PARA AI: instala Docker, abre o firewall e cria o
-  # diretorio de dados. Ele nao sobe aplicacao nenhuma, de proposito.
+  # O user_data prepara a VM e PARA AI: abre o firewall e cria o diretorio de
+  # dados. Ele nao instala runtime nem sobe aplicacao, de proposito.
   #
   # A regra e do host, nao de um app especifico: **user_data nao e lugar para
   # segredo**. Ele fica legivel em metadata da instancia, acessivel por qualquer
@@ -113,16 +113,21 @@ inputs = {
     # O IP reservado e anexado a VNIC logo apos a criacao da instancia, o que
     # pode ocorrer depois do cloud-init comecar. Sem esperar a rota de saida, o
     # primeiro download falha e o set -e derruba o script inteiro.
+    # ports.ubuntu.com e nao um host qualquer: e de onde o apt de arm64 puxa
+    # pacote, entao o check prova a rota que o proximo passo vai usar. Antes
+    # apontava para download.docker.com, herdado de quando esta VM instalava
+    # Docker — o check continuaria passando mesmo se o mirror do apt estivesse
+    # inalcancavel.
     echo "==> Aguardando conectividade de saida"
     for i in $(seq 1 90); do
-      if curl -sf -m 5 -o /dev/null https://download.docker.com; then
+      if curl -sf -m 5 -o /dev/null https://ports.ubuntu.com; then
         echo "  rede pronta na tentativa $i"
         break
       fi
       echo "  tentativa $i/90 — sem rota de saida ainda, aguardando 5s..."
       sleep 5
     done
-    curl -sf -m 10 -o /dev/null https://download.docker.com || {
+    curl -sf -m 10 -o /dev/null https://ports.ubuntu.com || {
       echo "ERRO: sem conectividade de saida apos 90 tentativas"
       exit 1
     }
@@ -149,18 +154,29 @@ inputs = {
       exit 1
     }
 
-    # docker.io + docker-compose-v2 dos repositorios do Ubuntu, e nao o repo
-    # oficial do Docker, de proposito: adicionar repo de terceiro no cloud-init
-    # exige baixar chave GPG, escrever sources.list e um apt-get update extra —
-    # tres passos a mais num lugar onde falha silenciosa custa a VM. As versoes
-    # que importam ficam pinadas nas imagens dos containers, nao no daemon do
-    # host.
-    echo "==> Instalando Docker"
+    # SEM Docker aqui, e isso e deliberado.
+    #
+    # A primeira versao instalava docker.io + docker-compose-v2, porque o
+    # desenho previa o agente em container com DinD como fronteira de execucao.
+    # O desenho mudou: o agente passou a rodar nativo, e o Docker ficou sem uso.
+    #
+    # Nao foi removido so por limpeza. Um daemon Docker no host e uma API
+    # equivalente a root — `docker run -v /:/host --privileged` entrega o
+    # sistema de arquivos inteiro. O socket e root:docker 0660, entao o caminho
+    # exige pertencer ao grupo `docker` ou ter sudo; o usuario do agente nao tem
+    # nenhum dos dois. Ou seja: era caminho LATENTE, nao aberto.
+    #
+    # Removido porque seguranca que depende de ninguem tomar um atalho
+    # conveniente e fragil: basta alguem, um dia, por o usuario no grupo docker
+    # "para testar" e a escalada abre sem ninguem perceber que abriu. E porque
+    # IaC nao deve instalar o que o desenho nao usa — user_data instalando
+    # Docker era documentacao errada da maquina.
+    #
+    # Se o desenho voltar a exigir container, o certo e reintroduzir aqui junto
+    # com a decisao de isolamento, nao herdar um daemon esquecido.
     apt_retry "update" apt-get -o DPkg::Lock::Timeout=600 update -y
-    apt_retry "docker" apt-get -o DPkg::Lock::Timeout=600 install -y docker.io docker-compose-v2
-    systemctl enable --now docker
 
-    # Diretorio de dados do mercurio, com o dono que o s6-overlay espera.
+    # Diretorio de dados da carga desta VM.
     echo "==> Preparando /opt/data (dono $DATA_UID:$DATA_GID)"
     mkdir -p /opt/data
     chown "$DATA_UID:$DATA_GID" /opt/data
@@ -183,8 +199,8 @@ inputs = {
     # reverso na 443; publicar porta de app direto o contornaria, e com ele a
     # autenticacao que estiver na frente.
 
-    echo "==> Host pronto: Docker instalado, firewall aberto, /opt/data criado."
-    echo "    Nenhuma aplicacao foi iniciada."
+    echo "==> Host pronto: firewall aberto e /opt/data criado."
+    echo "    Nenhum runtime instalado e nenhuma aplicacao iniciada."
   EOF
   )
 }
