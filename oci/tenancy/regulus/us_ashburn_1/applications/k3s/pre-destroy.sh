@@ -26,8 +26,39 @@ backup_minecraft_world() {
   echo "==> Executando backup remoto final do Minecraft ($job_name)..."
   $KUBECTL create job --from=cronjob/minecraft-longhorn-backup "$job_name" -n minecraft
 
-  if ! $KUBECTL wait -n minecraft --for=condition=complete "job/$job_name" --timeout=45m; then
-    echo "ERROR: backup remoto final do Minecraft falhou; destroy cancelado para preservar o PVC."
+  # Espera pelas DUAS condicoes terminais, nao so pela de sucesso.
+  #
+  # `wait --for=condition=complete` sozinho nao retorna quando o Job vai a
+  # Failed: ele fica ate o timeout. Com 45m isso significa 45 minutos parado
+  # esperando algo que ja acabou mal — visto na pratica em 04/09/2026, quando o
+  # pod do Minecraft ficou Pending (nodeSelector sem node correspondente), o
+  # backup falhou em 2 minutos e o destroy seguiu preso.
+  #
+  # Dois `wait` em paralelo, e o primeiro a terminar decide. Sem `wait -n` do
+  # bash porque o que interessa e QUAL condicao bateu, nao qual PID saiu.
+  local complete_pid failed_pid outcome=""
+  $KUBECTL wait -n minecraft --for=condition=complete "job/$job_name" --timeout=45m >/dev/null 2>&1 &
+  complete_pid=$!
+  $KUBECTL wait -n minecraft --for=condition=failed "job/$job_name" --timeout=45m >/dev/null 2>&1 &
+  failed_pid=$!
+
+  while :; do
+    if ! kill -0 "$complete_pid" 2>/dev/null; then
+      wait "$complete_pid" && outcome="complete"
+      break
+    fi
+    if ! kill -0 "$failed_pid" 2>/dev/null; then
+      wait "$failed_pid" && outcome="failed"
+      break
+    fi
+    sleep 5
+  done
+  kill "$complete_pid" "$failed_pid" 2>/dev/null || true
+
+  if [ "$outcome" != "complete" ]; then
+    echo "ERROR: backup remoto final do Minecraft nao concluiu (${outcome:-timeout});"
+    echo "  destroy cancelado para preservar o PVC."
+    $KUBECTL get pods -n minecraft -l "job-name=$job_name" 2>/dev/null || true
     $KUBECTL logs -n minecraft "job/$job_name" --all-containers=true 2>/dev/null || true
     exit 1
   fi
