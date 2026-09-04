@@ -19,13 +19,11 @@ locals {
   # tambem nao ha sensor para avisar que alguem tentou.
   ssh_port = 62222
 
-  # UID/GID que a imagem do agente usa via s6-overlay. Os nomes HERMES_UID e
-  # HERMES_GID sao da imagem upstream (nousresearch/hermes-agent) e continuam
-  # assim de proposito: renomea-los aqui esconderia a correspondencia com o que
-  # o container espera. O diretorio de dados precisa nascer com esse dono,
-  # senao o container nao escreve em /opt/data.
-  hermes_uid = 10000
-  hermes_gid = 10000
+  # Dono de /opt/data. Nao e numero arbitrario: e o UID/GID que a imagem do
+  # agente usa internamente, e o diretorio precisa nascer com ele, senao o
+  # container nao escreve.
+  data_uid = 10000
+  data_gid = 10000
 }
 
 dependency "vcn" {
@@ -74,15 +72,14 @@ inputs = {
   image_id            = local.region_vars.locals.image_id
   ssh_authorized_keys = run_cmd("--terragrunt-quiet", "op", "read", "op://Personal/Pessoal/public key")
 
-  # Sem volume de dados: os 10 GiB de /opt/data cabem no boot volume de 47 GB,
-  # que tem folga (o SO ocupa ~5 GB numa imagem nova). Um volume dedicado
-  # custaria franquia de block storage sem entregar nada — e a franquia esta
-  # apertada, ver docs do split.
+  # Sem volume de dados: /opt/data cabe no boot volume de 47 GB, que tem folga
+  # (o SO ocupa ~5 GB numa imagem nova). Um volume dedicado custaria franquia de
+  # block storage sem entregar nada — e a franquia esta apertada, ver docs do
+  # split.
   #
   # A contrapartida e que /opt/data vive no boot volume: nao ha como desanexar e
-  # reanexar o dado noutra VM sem copiar. Como o dado NAO e reconstruivel a
-  # partir do repositorio (auth.json do Codex, sessoes e skills), o backup
-  # remoto deixa de ser opcional — ele e o unico caminho de volta.
+  # reanexar o dado noutra VM sem copiar. Se a carga desta VM guardar estado que
+  # importe, backup remoto deixa de ser opcional — sera o unico caminho de volta.
 
   # Run Command fica pedido mas o agente do Ubuntu aarch64 nao entrega o plugin
   # nesta imagem; o Bastion, sim, e e o canal que nao depende de porta publica.
@@ -93,16 +90,14 @@ inputs = {
   reserved_public_ip_address = dependency.reserved_ip.outputs.public_ip_address
 
   # O user_data prepara a VM e PARA AI: instala Docker, abre o firewall e cria o
-  # diretorio de dados. Ele nao sobe o mercurio, de proposito.
+  # diretorio de dados. Ele nao sobe aplicacao nenhuma, de proposito.
   #
-  # O motivo e que o mercurio precisa de dois segredos (basic auth do dashboard e
-  # token do bot do Telegram) e user_data NAO e lugar para segredo: ele fica
-  # legivel em metadata da instancia, acessivel por qualquer processo na VM via
-  # 169.254.169.254 e por qualquer principal com permissao de leitura na
-  # instancia. Dentro do cluster isso era resolvido pelo External Secrets
-  # Operator; aqui o equivalente e injetar apenas o token de service account do
-  # 1Password por SSH, apos o boot, e deixar o `op` buscar o resto — um segredo
-  # de fora em vez de dois, mesmo principio do onepassword-token do cluster.
+  # A regra e do host, nao de um app especifico: **user_data nao e lugar para
+  # segredo**. Ele fica legivel em metadata da instancia, acessivel por qualquer
+  # processo na VM via 169.254.169.254 e por qualquer principal com permissao de
+  # leitura na instancia. Qualquer credencial que a carga desta VM precise entra
+  # depois do boot, por SSH, no maximo um token de service account do 1Password
+  # para o `op` buscar o resto — mesmo principio do onepassword-token do cluster.
   user_data_base64 = base64encode(<<-EOF
     #!/bin/bash
     exec > >(tee /var/log/mercurio-host-init.log) 2>&1
@@ -110,8 +105,8 @@ inputs = {
 
     SSH_PORT="${local.ssh_port}"
     PUBLIC_IP="${dependency.reserved_ip.outputs.public_ip_address}"
-    HERMES_UID="${local.hermes_uid}"
-    HERMES_GID="${local.hermes_gid}"
+    DATA_UID="${local.data_uid}"
+    DATA_GID="${local.data_gid}"
 
     echo "==> IP publico reservado, injetado pelo Terraform: $PUBLIC_IP"
 
@@ -158,17 +153,17 @@ inputs = {
     # oficial do Docker, de proposito: adicionar repo de terceiro no cloud-init
     # exige baixar chave GPG, escrever sources.list e um apt-get update extra —
     # tres passos a mais num lugar onde falha silenciosa custa a VM. As versoes
-    # que importam aqui estao nas imagens dos containers (o DinD e pinado no
-    # compose), nao no daemon do host.
+    # que importam ficam pinadas nas imagens dos containers, nao no daemon do
+    # host.
     echo "==> Instalando Docker"
     apt_retry "update" apt-get -o DPkg::Lock::Timeout=600 update -y
     apt_retry "docker" apt-get -o DPkg::Lock::Timeout=600 install -y docker.io docker-compose-v2
     systemctl enable --now docker
 
     # Diretorio de dados do mercurio, com o dono que o s6-overlay espera.
-    echo "==> Preparando /opt/data (dono $HERMES_UID:$HERMES_GID)"
+    echo "==> Preparando /opt/data (dono $DATA_UID:$DATA_GID)"
     mkdir -p /opt/data
-    chown "$HERMES_UID:$HERMES_GID" /opt/data
+    chown "$DATA_UID:$DATA_GID" /opt/data
     chmod 0750 /opt/data
 
     # A imagem Ubuntu da OCI fecha a chain INPUT com um REJECT, entao liberar na
@@ -184,12 +179,12 @@ inputs = {
     apt_retry "iptables-persistent" apt-get -o DPkg::Lock::Timeout=600 install -y iptables-persistent -q
     netfilter-persistent save
 
-    # O dashboard (9119) e o gateway (8642) NAO sao abertos: quem atende de fora
-    # e o proxy reverso na 443, no mesmo host. Publicar 9119 direto contornaria
-    # o proxy e, com ele, a primeira camada de autenticacao.
+    # Nenhuma porta de aplicacao e aberta aqui. Quem atende de fora e o proxy
+    # reverso na 443; publicar porta de app direto o contornaria, e com ele a
+    # autenticacao que estiver na frente.
 
-    echo "==> Host pronto. O mercurio ainda NAO esta rodando."
-    echo "    Falta injetar o token do 1Password e subir o compose — ver docs."
+    echo "==> Host pronto: Docker instalado, firewall aberto, /opt/data criado."
+    echo "    Nenhuma aplicacao foi iniciada."
   EOF
   )
 }

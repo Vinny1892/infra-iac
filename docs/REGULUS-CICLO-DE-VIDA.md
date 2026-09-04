@@ -422,9 +422,10 @@ Três leituras honestas desses números:
 ## Segredos: do bootstrap ao External Secrets Operator
 
 O modelo antigo era um script lendo o 1Password **uma vez**, no deploy. O que ele
-não criava não existia, e o que criava ninguém vigiava. Dois sintomas vinham daí:
-o Hermes ficava `CreateContainerConfigError` depois de toda recriação (seus dois
-Secrets eram feitos à mão) e a senha do Grafana divergia do banco a cada sync.
+não criava não existia, e o que criava ninguém vigiava. O sintoma que sobreviveu
+para contar a história é a senha do Grafana, que divergia do banco a cada sync;
+workloads cujos Secrets eram feitos à mão ficavam `CreateContainerConfigError`
+depois de cada recriação.
 
 Hoje:
 
@@ -493,13 +494,12 @@ conceito.
 
 | Item | Situação |
 |---|---|
-| Secrets do Hermes | **Resolvido** — vêm do 1Password via ESO. O deployment passou a usar `HERMES_DASHBOARD_BASIC_AUTH_PASSWORD` (texto puro, precedência sobre a variante `_HASH`, hasheada em memória no load), porque o ESO transporta valores sem transformar. |
 | Senha do Grafana | **Resolvido** — `admin.existingSecret` apontando para `grafana-admin`, vindo do cofre. O chart deixou de gerar a credencial. |
 | `apt_retry` sob contenção | Não exercitado — ver ressalva no defeito 2. |
 
-O padrão comum entre os dois primeiros era o mesmo — **secrets que não sobrevivem
-a uma recriação** — e foi resolvido generalizando a ideia do bootstrap com o
-External Secrets Operator (seção acima).
+O padrão por trás disso era **secret que não sobrevive a uma recriação**, e foi
+resolvido generalizando a ideia do bootstrap com o External Secrets Operator
+(seção acima).
 
 ---
 

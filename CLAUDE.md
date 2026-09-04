@@ -355,24 +355,24 @@ para `10.20.1.184` sem nada de propósito. Quem precisar do endereço lê de
 `terragrunt output -raw instance_private_ip`; quem precisa de regra de rede usa
 o CIDR da VCN, não o host.
 
-Sair do cluster teve preço: ele perdeu o backup do Longhorn para o S3, o
-certificado renovado pelo cert-manager e a reconciliação do GitOps. Os três
-precisam de substituto próprio, e o backup é o urgente — o `/opt/data` guarda
-`auth.json`, sessões e skills, que não são reconstruíveis a partir do
-repositório.
-
 **A intenção é que o mercurio administre este ambiente**: alterar a regulus e a
 danebola, aplicar mudanças, operar o cluster. Ele alcança as duas pelos IPs
 privados da VCN (a regra `10.20.0.0/16` na security list existe para isso, além
 do tráfego do k3s entre nodes).
 
-**O que isso significa para a superfície de ataque:** o mercurio roda um agente
-que executa comandos arbitrários em containers, com DinD como fronteira. Foi
-exatamente por isso que ele ganhou VM separada. Dar a ele credencial de
-administração das outras duas VMs devolve parte desse alcance — a fronteira
-deixa de ser "o agente não sai da VM dele" e passa a ser "o agente pode o que a
-credencial dele permite". Por isso a credencial deve ser **dedicada e escopada**,
-nunca a chave pessoal do vault `Personal` que o `deploy.sh` usa.
+**A credencial dele é dedicada, nunca a sua.** O SSH para regulus e danebola usa
+`op://Lab-IAC/Mercurio SSH`, autorizada no `authorized_keys` pelo
+`configure-regulus-host.sh`. Não use `op://Personal/Pessoal` para isso: essa é a
+chave do operador, e emprestá-la a um processo que executa comando arbitrário
+transforma "revogar o acesso do agente" em "trocar a sua chave e reconfigurar
+tudo que a usa, o `deploy.sh` incluído". A chave separada também dá atribuição —
+o sshd registra qual fingerprint autenticou.
+
+**Não declare a chave do mercurio em `ssh_authorized_keys` da unit.** Aquele
+campo vira metadata da instância, e mudar metadata **força replacement** na OCI:
+o próximo `deploy.sh deploy` destruiria e recriaria as duas VMs do cluster, num
+apply de aparência rotineira. A instalação pós-boot pelo
+`configure-regulus-host.sh` é idempotente e não toca na instância.
 
 ### Acesso SSH da Regulus e o honeypot na 22
 
