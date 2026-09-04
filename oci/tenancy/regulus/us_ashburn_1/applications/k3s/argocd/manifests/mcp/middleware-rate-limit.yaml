@@ -1,0 +1,41 @@
+# Rate limit dos MCPs expostos na internet.
+#
+# ORDEM IMPORTA: este middleware tem de vir ANTES do basic-auth na cadeia:
+#   traefik.ingress.kubernetes.io/router.middlewares: mcp-rate-limit@kubernetescrd,mcp-basic-auth@kubernetescrd
+#
+# O motivo é o custo do bcrypt. O hash é cost 12, ~250ms de CPU por verificação
+# — bom contra força bruta, péssimo como superfície de DoS: com o auth na
+# frente, 8 requisições por segundo saturam um core da vm-regulus só validando
+# senhas erradas. Limitando primeiro, a requisição sem credencial válida é
+# descartada barata.
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: rate-limit
+  namespace: mcp
+spec:
+  rateLimit:
+    # 30/min com burst de 15. Um agente conversando com o MCP faz rajadas curtas
+    # de várias chamadas, então burst apertado atrapalharia uso legítimo; o teto
+    # sustentado é que precisa ser baixo, porque nenhum uso real precisa de mais
+    # que isso de forma contínua.
+    average: 30
+    period: 1m
+    burst: 15
+    sourceCriterion:
+      ipStrategy:
+        # Sem isto, o "cliente" seria sempre a borda da Cloudflare e o limite
+        # viraria global — um atacante consumiria a cota de todos. `depth: 1`
+        # pega o IP mais à direita do X-Forwarded-For, que é o que a Cloudflare
+        # preenche com o cliente real.
+        #
+        # RESSALVA QUE VOCÊ PRECISA SABER: header é falsificável. Como o origin
+        # aceita 80/443 de 0.0.0.0/0, dá para ignorar a Cloudflare, bater direto
+        # no IP reservado e mandar um X-Forwarded-For diferente a cada
+        # requisição — e aí este limite não segura nada.
+        #
+        # O conserto de verdade não é aqui: é restringir 80/443 na security list
+        # às faixas da Cloudflare. Isso fecha o bypass e faz o header voltar a
+        # ser confiável. Enquanto não for feito, trate este rate limit como
+        # proteção contra varredura burra, não contra alvo dirigido.
+        depth: 1

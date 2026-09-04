@@ -1,0 +1,47 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: grafana-mcp-vinny-dev-br
+  namespace: mcp
+spec:
+  secretName: grafana-mcp-tls
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
+  dnsNames:
+    - grafana-mcp.vinny.dev.br
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: grafana-mcp
+  namespace: mcp
+  annotations:
+    # A ORDEM DA CADEIA IMPORTA: rate-limit antes de basic-auth.
+    #
+    # O hash do basic auth é bcrypt cost 12, ~250ms de CPU por verificação. Com
+    # o auth na frente, ~8 requisições por segundo saturam um core da vm-regulus
+    # só validando senha errada — força bruta viraria DoS barato. Limitando
+    # primeiro, requisição sem credencial é descartada antes de custar CPU.
+    #
+    # O formato é `<namespace>-<nome>@kubernetescrd`, então `mcp-rate-limit` é o
+    # namespace `mcp` mais o middleware `rate-limit`, e não um recurso chamado
+    # "mcp-rate-limit".
+    traefik.ingress.kubernetes.io/router.middlewares: mcp-rate-limit@kubernetescrd,mcp-basic-auth@kubernetescrd
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: grafana-mcp.vinny.dev.br
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: grafana-mcp
+                port:
+                  number: 80
+  tls:
+    - hosts:
+        - grafana-mcp.vinny.dev.br
+      secretName: grafana-mcp-tls
