@@ -182,3 +182,64 @@ enganam quem olhar.
 - Se o teste in-image se mostrar chato de escrever com `conch`, a alternativa é
   um CronJob que faça o login de fora e alerte. Aceita que o pod fique `Ready`
   quebrado, mas ainda avisa — hoje nada avisa.
+
+## [ ] Métricas de container duplicadas no VictoriaMetrics: todo `sum()` vale 2x
+
+**Onde:** `oci/tenancy/regulus/us_ashburn_1/applications/k3s/argocd/values/victoria-metrics.yaml`
+— hoje o arquivo **não tem** seção `kubelet`, então vale o scrape default do
+chart `victoria-metrics-k8s-stack`.
+
+**O defeito:** o kubelet expõe as mesmas métricas em dois endpoints, e o vmagent
+raspa os dois sob o mesmo `job="kubelet"`, na mesma `instance`. Resultado: cada
+container tem **duas séries idênticas**, distinguíveis só por `metrics_path`
+(`/metrics/cadvisor`, que traz o label `image`, e `/metrics/resource`, que não
+traz).
+
+Colidem exatamente três métricas, 68 séries cada:
+
+- `container_cpu_usage_seconds_total`
+- `container_memory_working_set_bytes`
+- `container_start_time_seconds`
+
+As demais de `/metrics/resource` (`pod_*`, `node_*_usage`, `*_swap_*`) só
+existem lá e **não** colidem — motivo para corrigir sem desligar o endpoint.
+
+**Consequência: qualquer `sum()` ou `count()` de CPU ou memória por namespace,
+pod ou cluster devolve o dobro.** Medido: o namespace `minecraft` somava
+11.366 Mi contra 5.685 Mi reais; o container do Grafana aparece duas vezes com
+243 Mi cada.
+
+**Pior que os painéis: as recording rules do próprio chart.** Duas regras
+agregam com `sum` sobre a métrica duplicada e gravam o resultado inflado —
+`node_namespace_pod_container:container_cpu_usage_seconds_total:sum_rate5m` e
+`:sum_irate`. Tudo que consome esses registros herda o erro, inclusive alerta.
+Antes de fechar, revisar se algum alerta de saturação dispara (ou deixa de
+disparar) por causa disso.
+
+**Como consertar:** manter o `/metrics/cadvisor` como fonte — tem labels mais
+ricos e é o que os dashboards do chart assumem — e derrubar as três métricas no
+scrape de `/metrics/resource`, via `metricRelabelConfigs` com `action: drop` em
+`__name__`. Desligar o endpoint inteiro é pior: perde-se `pod_*`, `node_*_usage`
+e as de swap.
+
+**Detalhe que engana — por isso passou 20h sem ninguém notar:** só `sum` e
+`count` inflam. `avg` de duas séries idênticas dá o valor certo, e `max`, `min`
+e `topk` também. Então metade dos painéis está correta, nenhum erro aparece em
+log, e o número errado é plausível — 11 GB de Minecraft não é absurdo o
+suficiente para levantar suspeita. Foi encontrado por acidente, comparando com
+`kubectl top` durante o dimensionamento do split das VMs.
+
+**Cuidados na implementação:**
+
+- **`kubectl top` não é afetado e não serve de validação depois.** O
+  metrics-server lê o kubelet direto, sem passar pelo VictoriaMetrics — foi
+  justamente a discrepância entre os dois que revelou o problema. Validar
+  conferindo que `count by (__name__) ({metrics_path="/metrics/resource"})` não
+  lista mais as três, e que a soma por namespace passa a bater com o `top`.
+- **Sobrescrever `kubelet.vmScrape` substitui a lista de endpoints do chart**,
+  não faz merge. Renderizar com os values reais antes de commitar:
+  `helm template test victoria-metrics-k8s-stack --repo https://victoriametrics.github.io/helm-charts/ --version 0.91.2 -f argocd/values/victoria-metrics.yaml`.
+- Versão do chart em dois lugares (seed Terraform e Application do ArgoCD): se
+  divergirem, o `selfHeal` reverte o seed no primeiro sync.
+- Os dados históricos já gravados continuam dobrados. Comparação com o passado
+  vai mostrar um degrau na correção — não é regressão.
