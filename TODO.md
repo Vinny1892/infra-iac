@@ -131,6 +131,83 @@ mede a camada errada passa enquanto o sistema está quebrado.
   dependeu de alguém ler `.status.conditions` na mão; o próximo caso passa em
   silêncio do mesmo jeito.
 
+## [ ] Cloudflare em Flexible: credencial atravessa a internet em claro
+
+**Decisão de 04/09/2026: aceito por enquanto.** O problema já existia em outros
+hosts antes do MCP, então expor o MCP não piora a categoria do risco — só
+aumenta a frequência. Fica registrado como dívida conhecida, não como descuido.
+
+**O que acontece:** a zona está em Flexible SSL. A cadeia é cliente → Cloudflare
+→ VM; o primeiro trecho é HTTPS, o **segundo é HTTP puro**, atravessando a
+internet pública entre o datacenter da Cloudflare e a OCI em Ashburn.
+
+**O que cruza em claro hoje:**
+
+| Credencial | Frequência |
+|---|---|
+| Bearer token do MCP do Grafana | **toda requisição** |
+| Senha de admin do Grafana | a cada login |
+| Cookie de sessão do ArgoCD | a cada requisição autenticada |
+
+O do MCP é o pior dos três porque é estático e repetido: quem ler uma vez
+repete para sempre, e não há rotação automática. Autenticação não ajuda aqui —
+o problema não é quem prova identidade, é a credencial ser legível em trânsito.
+Trocar basic auth por bearer não mudou nada nesse eixo.
+
+**O conserto:** trocar a zona para **Full (strict)**, que faz a Cloudflare falar
+HTTPS com o origin. Bônus: permitiria devolver o redirect HTTP→HTTPS no Traefik,
+que foi removido **só** por causa do Flexible (ver defeito 8 do `CLAUDE.md`).
+
+**Por que não foi feito agora — e aqui está a parte que precisa ser resolvida
+primeiro.** Full (strict) exige certificado válido em **todos** os hosts
+proxiados, porque o modo é da zona inteira. Em 04/09/2026, de quatro hosts, três
+estavam sem:
+
+```
+too many certificates (5) already issued for this exact set of
+identifiers in the last 168h
+```
+
+`grafana-mcp` tinha certificado; `grafana-k3s`, `argocd-k3s` e `whoami` não.
+Trocar para Full naquele momento derrubaria os três.
+
+**A causa é estrutural, não azar: cada ciclo destroy/deploy queima uma emissão
+por host.** Os Secrets dos certificados morrem com o cluster, então o
+cert-manager pede certificado novo do zero a cada recriação. O limite do Let's
+Encrypt é 5 por conjunto de identificadores por semana — cinco recriações e o
+host sobe sem TLS. É o que aconteceu.
+
+**Correção estrutural: um wildcard `*.vinny.dev.br` via DNS-01.** Um único
+conjunto de identificadores para todos os hosts, presentes e futuros, num só
+balde de cota. Hoje cada host tem o seu via HTTP-01 e gasta cota separada. O
+token da Cloudflare que o DNS-01 exige **já está no cluster**, usado pelo
+external-dns — não é credencial nova.
+
+**Ordem de execução quando pegar isto:**
+
+1. Wildcard via DNS-01 primeiro. Sem ele, o passo 2 volta a quebrar no próximo
+   deploy, e aí com a zona em Full — o que é pior que hoje, porque falha fechado.
+2. Confirmar que todos os hosts proxiados servem o wildcard e estão `Ready`.
+3. Só então trocar a zona para Full (strict).
+4. **Rotacionar o `Grafana MCP Server Token`.** O valor atual já atravessou em
+   claro, inclusive nos testes de validação — corrigir o transporte não
+   descontamina uma credencial que já vazou.
+5. Avaliar devolver o redirect HTTP→HTTPS no Traefik.
+
+**Alternativa mais estreita, se um host específico precisar de conserto antes do
+resto:** desproxiar só aquele host, e aí o tráfego vai direto para o Traefik em
+HTTPS com o certificado real, sem trecho em claro. Tem de ser por **anotação no
+Ingress** (`external-dns.alpha.kubernetes.io/cloudflare-proxied: "false"`), e
+não pelo painel: o external-dns roda com `--cloudflare-proxied` e reverte
+mudança manual no próximo reconcile. Custo: expõe o IP do origin para aquele
+host e perde a proteção de DDoS da Cloudflare.
+
+**Detalhe pendente, menor:** o comentário em
+`argocd/manifests/mcp/middleware-rate-limit.yaml` justifica a ordem da cadeia
+pelo custo de bcrypt do basic auth. Com o MCP do Grafana usando bearer, essa
+justificativa só vale se o Kubeshark vier a usar o basic auth. Corrigir na
+próxima mudança ali, para não deixar doc afirmando o que não vale mais.
+
 ## [ ] Probe do Cowrie mede TCP, não login — e domina a captura
 
 **Onde:** `oci/tenancy/regulus/us_ashburn_1/applications/k3s/argocd/manifests/cowrie/deployment.yaml:91-100`
