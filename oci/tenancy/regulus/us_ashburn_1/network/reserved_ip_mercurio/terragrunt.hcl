@@ -10,17 +10,17 @@ locals {
   region_vars = read_terragrunt_config(find_in_parent_folders("_locals.hcl"))
 }
 
-# Segundo IP reservado da tenancy, dedicado ao Hermes.
+# Segundo IP reservado da tenancy, dedicado ao mercurio.
 #
 # Existe como unit separada, e nao como segundo recurso na unit `reserved_ip`,
-# porque o ciclo de vida e independente: o Hermes sai do cluster e passa a viver
+# porque o ciclo de vida e independente: o mercurio sai do cluster e passa a viver
 # numa VM propria, que pode ser destruida e recriada sem tocar no k3s. Unit
-# separada tambem significa state separado — um destroy do Hermes nao chega perto
+# separada tambem significa state separado — um destroy do mercurio nao chega perto
 # do endereco que serve o cluster.
 #
 # O motivo de nao reaproveitar o IP do k3s: aquele endereco hospeda o honeypot na
 # porta 22 e leva varredura hostil o dia inteiro, acumulando reputacao ruim em
-# blocklist. Servir o Hermes pelo mesmo IP herdaria essa reputacao.
+# blocklist. Servir o mercurio pelo mesmo IP herdaria essa reputacao.
 generate "main" {
   path      = "main.tf"
   if_exists = "overwrite_terragrunt"
@@ -57,7 +57,7 @@ generate "main" {
     }
 
     output "public_ip_address" {
-      description = "Endereco IPv4 reservado, estavel entre ciclos de destroy/deploy da VM do Hermes"
+      description = "Endereco IPv4 reservado, estavel entre ciclos de destroy/deploy da VM do mercurio"
       value       = oci_core_public_ip.this.ip_address
     }
   EOF
@@ -65,5 +65,5 @@ generate "main" {
 
 inputs = {
   compartment_id = local.region_vars.locals.compartment_id
-  display_name   = "hermes-reserved-ip"
+  display_name   = "mercurio-reserved-ip"
 }

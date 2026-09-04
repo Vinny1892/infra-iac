@@ -39,9 +39,11 @@ inputs = {
     #    os nodes. O iptables das duas VMs já libera essas portas; quem barrava
     #    era só a security list.
     #
-    # 2. É o caminho de administração do mercurio. Ele fica em 10.20.1.x e
-    #    alcança regulus e danebola pelos IPs privados, sem depender de porta
-    #    aberta na internet.
+    # 2. É o caminho de administração do mercurio, que alcança regulus e
+    #    danebola pelos IPs privados, sem depender de porta aberta na internet.
+    #    A regra usa o CIDR da VCN e não o host: o IP privado do mercurio muda
+    #    a cada recriação da VM (visto em 04/09/2026), então uma regra por host
+    #    passaria a apontar para endereço de ninguém no primeiro replace.
     #
     # `protocol = "all"` e não uma lista de portas: enumerar as portas do k3s
     # aqui seria uma segunda fonte da verdade para brigar com o iptables de cada

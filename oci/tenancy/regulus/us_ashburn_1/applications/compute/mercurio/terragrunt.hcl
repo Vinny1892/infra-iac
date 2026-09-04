@@ -19,9 +19,11 @@ locals {
   # tambem nao ha sensor para avisar que alguem tentou.
   ssh_port = 62222
 
-  # UID/GID que a imagem do Hermes usa via s6-overlay (HERMES_UID/HERMES_GID no
-  # deployment que este host substitui). O diretorio de dados precisa nascer com
-  # esse dono, senao o container nao escreve em /opt/data.
+  # UID/GID que a imagem do agente usa via s6-overlay. Os nomes HERMES_UID e
+  # HERMES_GID sao da imagem upstream (nousresearch/hermes-agent) e continuam
+  # assim de proposito: renomea-los aqui esconderia a correspondencia com o que
+  # o container espera. O diretorio de dados precisa nascer com esse dono,
+  # senao o container nao escreve em /opt/data.
   hermes_uid = 10000
   hermes_gid = 10000
 }
@@ -36,7 +38,7 @@ dependency "vcn" {
 }
 
 dependency "reserved_ip" {
-  config_path = "../../../network/reserved_ip_hermes"
+  config_path = "../../../network/reserved_ip_mercurio"
 
   mock_outputs = {
     public_ip_id      = "ocid1.publicip.mock"
@@ -56,14 +58,14 @@ inputs = {
   compartment_id      = local.region_vars.locals.compartment_id
   availability_domain = dependency.vcn.outputs.subnet_public[0].availability_domain
   subnet_id           = dependency.vcn.outputs.subnet_public[0].id
-  instance_name       = "hermes"
+  instance_name       = "mercurio"
   shape               = "VM.Standard.A1.Flex"
 
   # 1 OCPU / 6 GB dos 4 OCPU / 24 GB da franquia Always Free de A1. O resto vai
   # para a vm-regulus (2/8, control plane) e a danebola (1/10, que hospeda o
   # Minecraft e seus 7 GiB de request). A soma fecha exatamente a franquia.
   #
-  # Dimensionado com folga de proposito: o pico medido do Hermes em 19h foi
+  # Dimensionado com folga de proposito: o pico medido do mercurio em 19h foi
   # 690 Mi. O que consome memoria aqui nao e o agente, sao os containers que ele
   # cria para executar comandos (TERMINAL_CONTAINER_MEMORY=1024 cada).
   ocpus         = 1
@@ -91,9 +93,9 @@ inputs = {
   reserved_public_ip_address = dependency.reserved_ip.outputs.public_ip_address
 
   # O user_data prepara a VM e PARA AI: instala Docker, abre o firewall e cria o
-  # diretorio de dados. Ele nao sobe o Hermes, de proposito.
+  # diretorio de dados. Ele nao sobe o mercurio, de proposito.
   #
-  # O motivo e que o Hermes precisa de dois segredos (basic auth do dashboard e
+  # O motivo e que o mercurio precisa de dois segredos (basic auth do dashboard e
   # token do bot do Telegram) e user_data NAO e lugar para segredo: ele fica
   # legivel em metadata da instancia, acessivel por qualquer processo na VM via
   # 169.254.169.254 e por qualquer principal com permissao de leitura na
@@ -103,7 +105,7 @@ inputs = {
   # de fora em vez de dois, mesmo principio do onepassword-token do cluster.
   user_data_base64 = base64encode(<<-EOF
     #!/bin/bash
-    exec > >(tee /var/log/hermes-host-init.log) 2>&1
+    exec > >(tee /var/log/mercurio-host-init.log) 2>&1
     set -euo pipefail
 
     SSH_PORT="${local.ssh_port}"
@@ -163,7 +165,7 @@ inputs = {
     apt_retry "docker" apt-get -o DPkg::Lock::Timeout=600 install -y docker.io docker-compose-v2
     systemctl enable --now docker
 
-    # Diretorio de dados do Hermes, com o dono que o s6-overlay espera.
+    # Diretorio de dados do mercurio, com o dono que o s6-overlay espera.
     echo "==> Preparando /opt/data (dono $HERMES_UID:$HERMES_GID)"
     mkdir -p /opt/data
     chown "$HERMES_UID:$HERMES_GID" /opt/data
@@ -186,7 +188,7 @@ inputs = {
     # e o proxy reverso na 443, no mesmo host. Publicar 9119 direto contornaria
     # o proxy e, com ele, a primeira camada de autenticacao.
 
-    echo "==> Host pronto. O Hermes ainda NAO esta rodando."
+    echo "==> Host pronto. O mercurio ainda NAO esta rodando."
     echo "    Falta injetar o token do 1Password e subir o compose — ver docs."
   EOF
   )

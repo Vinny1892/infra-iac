@@ -345,9 +345,15 @@ imagem (`nousresearch/hermes-agent`), no histórico do git e nos commits de
 04/09/2026; em tudo que é nosso, o nome é mercurio.
 
 Ele **saiu do k3s** e vive numa VM própria: `150.136.205.234` (IP reservado,
-estável entre recriações), 1 OCPU / 6 GB, IP privado `10.20.1.148`. Os
+estável entre recriações), 1 OCPU / 6 GB, na subnet pública `10.20.1.0/24`. Os
 manifests e a Application foram removidos do cluster — não existe mais nada de
 mercurio dentro do k3s.
+
+**Não fixe o IP privado dele em lugar nenhum.** Ele é atribuído pela subnet e
+muda a cada recriação da VM — na renomeação de 04/09/2026 saiu de `10.20.1.148`
+para `10.20.1.184` sem nada de propósito. Quem precisar do endereço lê de
+`terragrunt output -raw instance_private_ip`; quem precisa de regra de rede usa
+o CIDR da VCN, não o host.
 
 Sair do cluster teve preço: ele perdeu o backup do Longhorn para o S3, o
 certificado renovado pelo cert-manager e a reconciliação do GitOps. Os três
