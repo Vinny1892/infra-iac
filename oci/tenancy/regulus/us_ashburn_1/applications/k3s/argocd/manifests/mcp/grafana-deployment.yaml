@@ -42,6 +42,13 @@ spec:
             # Mesma família do ListenStream que abriu socket só em IPv6.
             - --address
             - 0.0.0.0:8000
+            # O MCP valida o header Host como defesa contra DNS rebinding, e o
+            # default é só variantes de loopback — daí o `403 forbidden: host
+            # not allowed` que ele devolveu no primeiro deploy, DEPOIS de o
+            # basic auth passar. Aceita `*`, mas a lista explícita é mais
+            # barata que a confiança no proxy.
+            - --allowed-hosts
+            - grafana-mcp.vinny.dev.br
           env:
             - name: GRAFANA_URL
               # Service interno, não o host público: o tráfego não sai do
@@ -52,6 +59,19 @@ spec:
               valueFrom:
                 secretKeyRef:
                   name: grafana-mcp-token
+                  key: token
+            # Autentica o CHAMADOR contra o MCP. Sem isto, o servidor aceita
+            # qualquer requisição que alcance o endereço e usa a credencial do
+            # Grafana em nome dela — inclusive de dentro do cluster, onde o
+            # basic auth do Traefik não passa. O cliente envia
+            # `Authorization: Bearer <token>`.
+            #
+            # É por isso que o Ingress NÃO tem basic auth: os dois disputariam o
+            # header Authorization. Ver o comentário no grafana-ingress.yaml.
+            - name: MCP_GRAFANA_SERVER_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: grafana-mcp-server-token
                   key: token
           ports:
             - name: http

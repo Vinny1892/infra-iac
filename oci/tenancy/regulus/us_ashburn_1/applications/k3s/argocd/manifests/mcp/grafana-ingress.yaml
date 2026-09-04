@@ -17,17 +17,24 @@ metadata:
   name: grafana-mcp
   namespace: mcp
   annotations:
-    # A ORDEM DA CADEIA IMPORTA: rate-limit antes de basic-auth.
+    # Só rate limit. SEM basic auth, e isso é deliberado.
     #
-    # O hash do basic auth é bcrypt cost 12, ~250ms de CPU por verificação. Com
-    # o auth na frente, ~8 requisições por segundo saturam um core da vm-regulus
-    # só validando senha errada — força bruta viraria DoS barato. Limitando
-    # primeiro, requisição sem credencial é descartada antes de custar CPU.
+    # O MCP tem autenticação própria por bearer token, e os dois disputam o
+    # mesmo header `Authorization`: com `removeHeader: true` o Traefik apaga o
+    # header e o MCP recebe requisição sem bearer; sem `removeHeader`, o MCP
+    # recebe `Basic` onde espera `Bearer`. Não há como ter os dois.
+    #
+    # O bearer é a escolha melhor, não um consolo: ele também autentica quem
+    # alcança o ClusterIP de dentro do cluster, onde o Ingress não passa, e o
+    # upstream avisa que a ausência dele virará erro de inicialização.
+    #
+    # O Middleware de basic auth continua no repo para quem não tiver auth
+    # próprio — o MCP do kubeshark é o próximo candidato.
     #
     # O formato é `<namespace>-<nome>@kubernetescrd`, então `mcp-rate-limit` é o
     # namespace `mcp` mais o middleware `rate-limit`, e não um recurso chamado
     # "mcp-rate-limit".
-    traefik.ingress.kubernetes.io/router.middlewares: mcp-rate-limit@kubernetescrd,mcp-basic-auth@kubernetescrd
+    traefik.ingress.kubernetes.io/router.middlewares: mcp-rate-limit@kubernetescrd
 spec:
   ingressClassName: traefik
   rules:
