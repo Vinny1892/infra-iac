@@ -5,22 +5,47 @@ DEVICE="/dev/oracleoci/oraclevdb"
 LONGHORN_DIR="/var/lib/longhorn"
 TEMP_MOUNT="/mnt/longhorn-data"
 
+authorize_key() {
+  local public_key="$1" label="$2"
+
+  install -d -m 700 -o ubuntu -g ubuntu /home/ubuntu/.ssh
+  touch /home/ubuntu/.ssh/authorized_keys
+  if grep -qxF "$public_key" /home/ubuntu/.ssh/authorized_keys; then
+    echo "  chave de $label ja autorizada."
+  else
+    printf '%s\n' "$public_key" >> /home/ubuntu/.ssh/authorized_keys
+    echo "  chave de $label adicionada."
+  fi
+  chown ubuntu:ubuntu /home/ubuntu/.ssh/authorized_keys
+  chmod 600 /home/ubuntu/.ssh/authorized_keys
+}
+
 install_ssh_key() {
   if [ -z "${REGULUS_SSH_PUBLIC_KEY_B64:-}" ]; then
     echo "ERROR: REGULUS_SSH_PUBLIC_KEY_B64 nao foi informado."
     exit 1
   fi
+  authorize_key "$(printf '%s' "$REGULUS_SSH_PUBLIC_KEY_B64" | base64 --decode)" "operador"
 
-  local public_key
-  public_key=$(printf '%s' "$REGULUS_SSH_PUBLIC_KEY_B64" | base64 --decode)
-
-  install -d -m 700 -o ubuntu -g ubuntu /home/ubuntu/.ssh
-  touch /home/ubuntu/.ssh/authorized_keys
-  if ! grep -qxF "$public_key" /home/ubuntu/.ssh/authorized_keys; then
-    printf '%s\n' "$public_key" >> /home/ubuntu/.ssh/authorized_keys
+  # Chave do mercurio, a VM de administracao. Opcional de proposito: um host
+  # configurado sem ela continua funcionando, so nao aceita o agente.
+  #
+  # Instalada aqui, e NAO em `ssh_authorized_keys` da unit, por um motivo que
+  # nao e obvio: aquele campo vira metadata da instancia, e mudar metadata
+  # FORCA REPLACEMENT na OCI. Declara-la lá faria o proximo `deploy.sh deploy`
+  # destruir e recriar as duas VMs do cluster — num apply que parece rotina.
+  # Aqui a instalacao e pos-boot e idempotente, sem tocar na instancia.
+  #
+  # Vai no usuario `ubuntu`, que tem sudo sem senha nas imagens da OCI: e
+  # acesso de root, que e o que "administrar o ambiente" exige. O que a chave
+  # separada preserva nao e o privilegio, e a REVOGACAO (apagar uma linha, sem
+  # mexer na chave do operador) e a ATRIBUICAO (o sshd registra qual
+  # fingerprint autenticou, entao da para distinguir operador de agente).
+  if [ -n "${MERCURIO_SSH_PUBLIC_KEY_B64:-}" ]; then
+    authorize_key "$(printf '%s' "$MERCURIO_SSH_PUBLIC_KEY_B64" | base64 --decode)" "mercurio"
+  else
+    echo "  MERCURIO_SSH_PUBLIC_KEY_B64 ausente; o mercurio nao tera SSH neste host."
   fi
-  chown ubuntu:ubuntu /home/ubuntu/.ssh/authorized_keys
-  chmod 600 /home/ubuntu/.ssh/authorized_keys
 }
 
 wait_for_device() {

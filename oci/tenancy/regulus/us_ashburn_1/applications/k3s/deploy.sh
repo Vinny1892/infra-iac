@@ -6,6 +6,10 @@ OCI_UNIT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"  # us_ashburn_1/
 
 SSH_KEY_REF="op://Personal/Pessoal/private key?ssh-format=openssh"
 SSH_PUBLIC_KEY_REF="op://Personal/Pessoal/public key"
+# Chave dedicada da VM de administracao (mercurio). Separada da chave do
+# operador de proposito: o mercurio executa comandos arbitrarios em containers,
+# entao a credencial dele tem de ser revogavel sozinha, sem tocar na sua.
+MERCURIO_SSH_PUBLIC_KEY_REF="op://Lab-IAC/Mercurio SSH/public key"
 SSH_KEY=""
 # Porta usada durante o bootstrap. A VM nasce com o sshd na 22; so no fim do
 # deploy, com o cluster de pe, o harden_ssh_port move para HARDENED_SSH_PORT e
@@ -186,7 +190,7 @@ join_agent() {
 
 configure_regulus_host() {
   local vm_ip="$1"
-  local script_b64 public_key_b64
+  local script_b64 public_key_b64 mercurio_key_b64
 
   # O plugin "Compute Instance Run Command" nao e exposto nesta instancia
   # (a API responde "not present"), entao a configuracao vai por SSH — que ja
@@ -194,9 +198,18 @@ configure_regulus_host() {
   script_b64=$(base64 -w0 "$SCRIPT_DIR/scripts/configure-regulus-host.sh")
   public_key_b64=$(op read "$SSH_PUBLIC_KEY_REF" | base64 -w0)
 
-  echo "==> Configurando chave SSH e volume do Longhorn em ${2:-$vm_ip}..."
+  # Falha alto se a chave do mercurio nao estiver no cofre, em vez de seguir
+  # calado: um cluster sem ela e um cluster que o mercurio nao administra, e
+  # descobrir isso depois custa mais do que abortar aqui.
+  mercurio_key_b64=$(op read "$MERCURIO_SSH_PUBLIC_KEY_REF" | base64 -w0)
+  if [ -z "${mercurio_key_b64:-}" ]; then
+    echo "ERROR: nao consegui ler $MERCURIO_SSH_PUBLIC_KEY_REF do cofre."
+    exit 1
+  fi
+
+  echo "==> Configurando chaves SSH e volume do Longhorn em ${2:-$vm_ip}..."
   ssh -i "$SSH_KEY" -p "$SSH_PORT" $SSH_OPTS "$SSH_USER@$vm_ip" \
-    "printf '%s' '$script_b64' | base64 --decode | sudo REGULUS_SSH_PUBLIC_KEY_B64='$public_key_b64' bash"
+    "printf '%s' '$script_b64' | base64 --decode | sudo REGULUS_SSH_PUBLIC_KEY_B64='$public_key_b64' MERCURIO_SSH_PUBLIC_KEY_B64='$mercurio_key_b64' bash"
   echo "Host ${2:-$vm_ip} configurado."
 }
 
