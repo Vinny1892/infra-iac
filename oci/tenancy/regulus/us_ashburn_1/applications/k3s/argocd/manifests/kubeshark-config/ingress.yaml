@@ -1,0 +1,48 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: kubeshark-vinny-dev-br
+  namespace: kubeshark
+spec:
+  secretName: kubeshark-tls
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
+  dnsNames:
+    - kubeshark.vinny.dev.br
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: kubeshark
+  namespace: kubeshark
+  annotations:
+    # rate-limit antes de basic-auth, e aqui a ordem tem consequência real: o
+    # bcrypt cost 12 custa ~250ms de CPU por tentativa, então com o auth na
+    # frente uma força bruta vira DoS barato. Limitar primeiro descarta a
+    # requisição sem credencial antes de gastar CPU.
+    #
+    # Os dois middlewares vivem no namespace `kubeshark`, não em `mcp`, porque
+    # o Traefik v3 não permite referência cross-namespace por default. Ver
+    # basic-auth.yaml.
+    traefik.ingress.kubernetes.io/router.middlewares: kubeshark-rate-limit@kubernetescrd,kubeshark-basic-auth@kubernetescrd
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: kubeshark.vinny.dev.br
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                # `kubeshark-front` é o nome que o chart gera, servindo na 80 e
+                # apontando para a 8080 do container. Conferido no render, não
+                # suposto.
+                name: kubeshark-front
+                port:
+                  number: 80
+  tls:
+    - hosts:
+        - kubeshark.vinny.dev.br
+      secretName: kubeshark-tls
