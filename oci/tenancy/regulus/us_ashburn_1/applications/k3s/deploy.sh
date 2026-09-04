@@ -47,6 +47,25 @@ get_vm_ip() {
   terragrunt output -raw instance_public_ip 2>/dev/null
 }
 
+# Descobre em qual porta o sshd desta VM atende.
+#
+# Uma VM recem-criada esta na 22; uma que ja passou pelo harden_ssh_port esta na
+# porta alta. O destroy precisa falar com as duas, e fixar 22 fazia o uninstall
+# do K3s falhar silenciosamente contra qualquer VM ja endurecida. Testa a porta
+# alta primeiro porque e o estado normal de uma VM em producao.
+detect_ssh_port() {
+  local vm_ip="$1"
+  local p
+  for p in "$HARDENED_SSH_PORT" 22; do
+    if ssh -i "$SSH_KEY" -p "$p" $SSH_OPTS -o ConnectTimeout=8 "$SSH_USER@$vm_ip" true 2>/dev/null; then
+      SSH_PORT="$p"
+      echo "==> sshd atende na porta $p." >&2
+      return 0
+    fi
+  done
+  echo "AVISO: sshd nao respondeu em $HARDENED_SSH_PORT nem na 22; mantendo $SSH_PORT." >&2
+}
+
 # O .terragrunt-cache guarda a config de backend de quando foi gerado. Quando a
 # copia local fica velha em relacao ao repositorio, o terraform recusa qualquer
 # comando com "Backend configuration changed" e o -auto-approve nao tem como
@@ -473,6 +492,13 @@ verify() {
 }
 
 destroy() {
+  # A VM pode estar na 22 (recem-criada) ou na porta alta (ja endurecida).
+  local vm_ip_probe
+  vm_ip_probe=$(cd "$OCI_UNIT_DIR/applications/compute/vm" && get_vm_ip) || true
+  if [ -n "${vm_ip_probe:-}" ]; then
+    detect_ssh_port "$vm_ip_probe"
+  fi
+
   echo "==> Pre-destroy cleanup..."
   bash "$SCRIPT_DIR/pre-destroy.sh"
 
