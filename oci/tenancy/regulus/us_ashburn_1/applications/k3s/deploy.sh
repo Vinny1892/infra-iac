@@ -688,40 +688,51 @@ destroy() {
   # O pre-destroy usa kubectl local. Atualizar o kubeconfig aqui evita depender
   # de um arquivo deixado por deploy anterior — ele pode nao existir em uma
   # maquina de administracao nova ou apontar para IP antigo apos replacement.
-  local cleanup_vm_ip cleanup_vm_port
+  local cleanup_vm_ip cleanup_vm_port cluster_cleanup=true
   cleanup_vm_ip=$(cd "$OCI_UNIT_DIR/applications/compute/vm" && get_vm_ip) || true
   if [ -n "${cleanup_vm_ip:-}" ]; then
     cleanup_vm_port=$(detect_ssh_port "$cleanup_vm_ip")
     SSH_PORT="$cleanup_vm_port"
-    fetch_kubeconfig "$cleanup_vm_ip"
+    if ssh -i "$SSH_KEY" -p "$SSH_PORT" $SSH_OPTS "$SSH_USER@$cleanup_vm_ip" \
+         "test -r /etc/rancher/k3s/k3s.yaml"; then
+      fetch_kubeconfig "$cleanup_vm_ip"
+    elif [ -n "${MINECRAFT_VERIFIED_BACKUP:-}" ]; then
+      # Retomada explicita: a tentativa anterior ja concluiu pre-destroy, Helm e
+      # uninstall, mas falhou no provider OCI ao destruir compute. Sem K3s nao
+      # ha API para repetir/validar cleanup; o backup informado foi validado
+      # enquanto o cluster ainda estava vivo.
+      cluster_cleanup=false
+      echo "==> K3s ja ausente; retomando destroy apos backup verificado."
+    else
+      echo "ERROR: K3s ausente e nenhum backup verificado foi informado; destroy cancelado."
+      exit 1
+    fi
   elif [ ! -f "$KUBECONFIG_PATH" ]; then
     echo "ERROR: VM indisponivel e kubeconfig local inexistente; cleanup inseguro."
     exit 1
   fi
 
-  echo "==> Pre-destroy cleanup..."
-  bash "$SCRIPT_DIR/pre-destroy.sh"
+  if [ "$cluster_cleanup" = true ]; then
+    echo "==> Pre-destroy cleanup..."
+    bash "$SCRIPT_DIR/pre-destroy.sh"
 
-  echo "==> Destruindo helm releases..."
-  cd "$SCRIPT_DIR/helms"
-  tg_init
-  # Force-unlock before destroy too
-  local lock_id
-  lock_id=$(K3S_OCI_KUBECONFIG="$KUBECONFIG_PATH" terragrunt plan 2>&1 | grep -oP 'ID:\s+\K[a-f0-9-]+' | head -1) || true
-  if [ -n "${lock_id:-}" ]; then
-    terragrunt force-unlock -force "$lock_id" 2>/dev/null || true
-  fi
-  # O `|| true` continua: a VM e destruida logo abaixo, entao um release orfao
-  # no state e inofensivo — o apply seguinte reconcilia. O que faltava era
-  # explicar POR QUE falhou. Sem isto, o timeout do longhorn-uninstall aparecia
-  # apenas como "timed out waiting for the condition", sem causa.
-  if ! K3S_OCI_KUBECONFIG="$KUBECONFIG_PATH" terragrunt destroy --auto-approve; then
-    echo "AVISO: destroy dos helm releases falhou. Coletando diagnostico..."
-    local kc=(kubectl --kubeconfig "$KUBECONFIG_PATH" -n longhorn-system)
-    "${kc[@]}" get jobs 2>/dev/null || true
-    "${kc[@]}" logs job/longhorn-uninstall --tail=40 2>/dev/null \
-      || echo "  (sem job longhorn-uninstall — a falha veio de outro release)"
-    "${kc[@]}" get volumes.longhorn.io 2>/dev/null || true
+    echo "==> Destruindo helm releases..."
+    cd "$SCRIPT_DIR/helms"
+    tg_init
+    # Force-unlock before destroy too
+    local lock_id
+    lock_id=$(K3S_OCI_KUBECONFIG="$KUBECONFIG_PATH" terragrunt plan 2>&1 | grep -oP 'ID:\s+\K[a-f0-9-]+' | head -1) || true
+    if [ -n "${lock_id:-}" ]; then
+      terragrunt force-unlock -force "$lock_id" 2>/dev/null || true
+    fi
+    if ! K3S_OCI_KUBECONFIG="$KUBECONFIG_PATH" terragrunt destroy --auto-approve; then
+      echo "AVISO: destroy dos helm releases falhou. Coletando diagnostico..."
+      local kc=(kubectl --kubeconfig "$KUBECONFIG_PATH" -n longhorn-system)
+      "${kc[@]}" get jobs 2>/dev/null || true
+      "${kc[@]}" logs job/longhorn-uninstall --tail=40 2>/dev/null \
+        || echo "  (sem job longhorn-uninstall — a falha veio de outro release)"
+      "${kc[@]}" get volumes.longhorn.io 2>/dev/null || true
+    fi
   fi
 
   # Uninstall do K3s so agora: antes do destroy acima o cluster precisa estar
@@ -768,12 +779,12 @@ destroy() {
   echo "==> Destruindo danebola..."
   cd "$OCI_UNIT_DIR/applications/compute/danebola"
   tg_init
-  terragrunt destroy --auto-approve || true
+  terragrunt destroy --auto-approve
 
   echo "==> Destruindo vm-regulus..."
   cd "$OCI_UNIT_DIR/applications/compute/vm"
   tg_init
-  terragrunt destroy --auto-approve || true
+  terragrunt destroy --auto-approve
 }
 
 usage() {
@@ -791,6 +802,7 @@ for arg in "$@"; do
       SSH_KEY_REF="$MERCURIO_SSH_KEY_REF"
       SSH_PUBLIC_KEY_REF="$MERCURIO_SSH_PUBLIC_KEY_REF"
       export K3S_USE_MERCURIO_KEY=true
+      export OCI_TERRAFORM_AUTH=InstancePrincipal
       # A mesma service account que da ao agente acesso ao vault Lab-IAC e
       # entregue ao External Secrets Operator. Sem esta exportacao o Terragrunt
       # tentaria buscar no vault IAM o token pessoal do fluxo do operador — um
