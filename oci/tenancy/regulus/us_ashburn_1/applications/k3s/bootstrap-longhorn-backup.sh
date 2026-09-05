@@ -25,11 +25,15 @@ if ! aws s3api head-bucket --bucket "$BUCKET" --profile "$AWS_PROFILE"; then
   exit 1
 fi
 
-if ! aws iam get-user --user-name "$IAM_USER" --profile "$AWS_PROFILE" >/dev/null 2>&1; then
-  aws iam create-user --user-name "$IAM_USER" --profile "$AWS_PROFILE" >/dev/null
-fi
+if op item get "$S3_ITEM" --vault "$VAULT" --format json >"$TMP_DIR/s3-item.json" 2>/dev/null; then
+  echo "==> Credencial S3 existente no 1Password; reutilizando sem alterar IAM."
+else
+  echo "==> Credencial S3 ausente; criando identidade IAM dedicada."
+  if ! aws iam get-user --user-name "$IAM_USER" --profile "$AWS_PROFILE" >/dev/null 2>&1; then
+    aws iam create-user --user-name "$IAM_USER" --profile "$AWS_PROFILE" >/dev/null
+  fi
 
-cat >"$TMP_DIR/s3-policy.json" <<'EOF'
+  cat >"$TMP_DIR/s3-policy.json" <<'EOF'
 {
   "Version": "2012-10-17",
   "Statement": [
@@ -48,10 +52,9 @@ cat >"$TMP_DIR/s3-policy.json" <<'EOF'
   ]
 }
 EOF
-aws iam put-user-policy --user-name "$IAM_USER" --policy-name longhorn-backup-k3s \
-  --policy-document "file://$TMP_DIR/s3-policy.json" --profile "$AWS_PROFILE"
+  aws iam put-user-policy --user-name "$IAM_USER" --policy-name longhorn-backup-k3s \
+    --policy-document "file://$TMP_DIR/s3-policy.json" --profile "$AWS_PROFILE"
 
-if ! op item get "$S3_ITEM" --vault "$VAULT" --format json >"$TMP_DIR/s3-item.json" 2>/dev/null; then
   aws iam create-access-key --user-name "$IAM_USER" --profile "$AWS_PROFILE" >"$TMP_DIR/access-key.json"
   access_key="$(jq -r '.AccessKey.AccessKeyId' "$TMP_DIR/access-key.json")"
   secret_key="$(jq -r '.AccessKey.SecretAccessKey' "$TMP_DIR/access-key.json")"
