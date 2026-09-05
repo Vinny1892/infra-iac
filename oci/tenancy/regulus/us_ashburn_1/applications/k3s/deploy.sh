@@ -4,12 +4,18 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 OCI_UNIT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"  # us_ashburn_1/
 
-SSH_KEY_REF="op://Personal/Pessoal/private key?ssh-format=openssh"
-SSH_PUBLIC_KEY_REF="op://Personal/Pessoal/public key"
+OPERATOR_SSH_KEY_REF="op://Personal/Pessoal/private key?ssh-format=openssh"
+OPERATOR_SSH_PUBLIC_KEY_REF="op://Personal/Pessoal/public key"
 # Chave dedicada da VM de administracao (mercurio). Separada da chave do
 # operador de proposito: o mercurio executa comandos arbitrarios em containers,
 # entao a credencial dele tem de ser revogavel sozinha, sem tocar na sua.
+MERCURIO_SSH_KEY_REF="op://Lab-IAC/Mercurio SSH/private key"
 MERCURIO_SSH_PUBLIC_KEY_REF="op://Lab-IAC/Mercurio SSH/public key"
+# Por padrao o deploy continua usando a chave pessoal do operador. Agentes e
+# automacoes sem acesso ao vault Personal passam --use-mercurio-key e usam o
+# par dedicado do mercurio tanto para conectar quanto para configurar os hosts.
+SSH_KEY_REF="$OPERATOR_SSH_KEY_REF"
+SSH_PUBLIC_KEY_REF="$OPERATOR_SSH_PUBLIC_KEY_REF"
 SSH_KEY=""
 # Porta usada durante o bootstrap. A VM nasce com o sshd na 22; so no fim do
 # deploy, com o cluster de pe, o harden_ssh_port move para HARDENED_SSH_PORT e
@@ -753,7 +759,41 @@ destroy() {
   terragrunt destroy --auto-approve || true
 }
 
-MODE="${1:-deploy}"
+usage() {
+  echo "Usage: $0 [--use-mercurio-key] [deploy|configure-hosts|helms-only|verify|destroy]"
+  echo ""
+  echo "  --use-mercurio-key  usa a chave dedicada do Mercurio; sem a flag,"
+  echo "                       usa a chave pessoal do operador (padrao)."
+}
+
+MODE="deploy"
+MODE_SET=false
+for arg in "$@"; do
+  case "$arg" in
+    --use-mercurio-key)
+      SSH_KEY_REF="$MERCURIO_SSH_KEY_REF"
+      SSH_PUBLIC_KEY_REF="$MERCURIO_SSH_PUBLIC_KEY_REF"
+      ;;
+    deploy|configure-hosts|helms-only|verify|destroy)
+      if [ "$MODE_SET" = true ]; then
+        echo "ERROR: informe apenas um modo de execucao."
+        usage
+        exit 1
+      fi
+      MODE="$arg"
+      MODE_SET=true
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "ERROR: parametro desconhecido: $arg"
+      usage
+      exit 1
+      ;;
+  esac
+done
 
 case "$MODE" in
   deploy)
@@ -818,7 +858,7 @@ case "$MODE" in
     destroy
     ;;
   *)
-    echo "Usage: $0 [deploy|configure-hosts|helms-only|verify|destroy]"
+    usage
     exit 1
     ;;
 esac
