@@ -96,10 +96,20 @@ spec:
                   printf '{"name":"%s"}\n' "$snapshot" >/tmp/backup-request.json
 
                   # Usa o proxy autenticado do apiserver: nao ha token Longhorn
-                  # nem endpoint administrativo exposto ao pod.
-                  kubectl -n longhorn-system create --raw \
-                    "/api/v1/namespaces/longhorn-system/services/http:longhorn-backend:9500/proxy/v1/volumes/$volume?action=snapshotBackup" \
-                    -f /tmp/backup-request.json >/dev/null
+                  # nem endpoint administrativo exposto ao pod. O Service pode
+                  # escolher um manager remoto temporariamente inacessivel pelo
+                  # overlay; tente outros endpoints antes de falhar o backup.
+                  requested=false
+                  for _ in $(seq 1 12); do
+                    if kubectl -n longhorn-system create --raw \
+                      "/api/v1/namespaces/longhorn-system/services/http:longhorn-backend:9500/proxy/v1/volumes/$volume?action=snapshotBackup" \
+                      -f /tmp/backup-request.json >/dev/null 2>&1; then
+                      requested=true
+                      break
+                    fi
+                    sleep 3
+                  done
+                  test "$requested" = true
 
                   backup=""
                   for _ in $(seq 1 60); do

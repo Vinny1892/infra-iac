@@ -71,7 +71,7 @@ inputs = {
   ocpus               = 2
   memory_in_gbs       = 8
   image_id            = local.region_vars.locals.image_id
-  ssh_authorized_keys = run_cmd("--terragrunt-quiet", "op", "read", "op://Personal/Pessoal/public key")
+  ssh_authorized_keys = run_cmd("--terragrunt-quiet", "../../k3s/scripts/resolve-ssh-public-key.sh")
 
   # Volume dedicado ao Longhorn, formatado e montado em /var/lib/longhorn pelo
   # configure-regulus-host.sh (via UUID no fstab), nao pelo cloud-init.
@@ -199,15 +199,30 @@ inputs = {
     apt_retry "iptables-persistent" apt-get -o DPkg::Lock::Timeout=600 install -y iptables-persistent -q
     netfilter-persistent save
 
-    # MTU do overlay: a VCN da OCI negocia jumbo frames (MTU 8950) na enp0s6, e
-    # o flannel herda esse valor para flannel.1, cni0 e veths. Mas o VXLAN
-    # encapsula em UDP e a rede entrega no maximo ~1450 bytes de payload —
-    # pacote maior morre silenciosamente (sem ICMP, sem log). Sintoma real em
-    # 05/09/2026, pos-split das VMs: TCP conectava, handshake TLS travava, todo
-    # pod->API expirava (dial tcp 10.43.0.1:443: i/o timeout) e os controllers
-    # perdiam leader-election em cascata (vm-operator, cainjector, cnpg, CSI).
-    # Ping pequeno passava; DF ping >1400 sobre o overlay nao. --flannel-mtu
-    # corrige flannel.1, cni0 e os veths de forma consistente desde o boot.
+    # A VCN da OCI negocia jumbo frames (MTU 9000) na enp0s6. O Flannel deriva
+    # desse valor um MTU 8950 para o VXLAN, mas o caminho efetivo entre pods nao
+    # entrega esses pacotes: TCP conecta e o handshake TLS trava, derrubando
+    # pod->API e leader-election em cascata. K3s v1.36 nao oferece
+    # --flannel-mtu; limitar a interface base a 1500 antes do K3s faz o Flannel
+    # derivar corretamente 1450 para flannel.1, cni0 e todos os veths.
+    cat >/etc/systemd/system/oci-network-mtu.service <<'UNIT'
+    [Unit]
+    Description=Limit OCI VNIC MTU for the K3s VXLAN overlay
+    Wants=network-online.target
+    After=network-online.target
+    Before=k3s.service k3s-agent.service
+
+    [Service]
+    Type=oneshot
+    ExecStart=/usr/sbin/ip link set dev enp0s6 mtu 1500
+    RemainAfterExit=yes
+
+    [Install]
+    WantedBy=multi-user.target
+    UNIT
+    systemctl daemon-reload
+    systemctl enable --now oci-network-mtu.service
+
     echo "==> Instalando K3s $K3S_VERSION"
     # --node-external-ip: REMOVIDO. Com IP reservado anexado a VNIC, o k3s nao
     # descobre sozinho o endereco externo — mas o unico consumidor dessa flag
@@ -220,7 +235,6 @@ inputs = {
       --write-kubeconfig-mode 644 \
       --disable=traefik \
       --disable=servicelb \
-      --flannel-mtu 1450 \
       --tls-san "$PUBLIC_IP" \
       --tls-san "$DNS_NAME"
 

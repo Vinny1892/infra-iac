@@ -70,7 +70,7 @@ inputs = {
   memory_in_gbs = 6
 
   image_id            = local.region_vars.locals.image_id
-  ssh_authorized_keys = run_cmd("--terragrunt-quiet", "op", "read", "op://Personal/Pessoal/public key")
+  ssh_authorized_keys = run_cmd("--terragrunt-quiet", "../../k3s/scripts/resolve-ssh-public-key.sh")
 
   # Sem volume de dados: /opt/data cabe no boot volume de 47 GB, que tem folga
   # (o SO ocupa ~5 GB numa imagem nova). Um volume dedicado custaria franquia de

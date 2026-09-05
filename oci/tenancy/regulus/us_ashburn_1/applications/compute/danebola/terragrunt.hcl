@@ -54,7 +54,7 @@ inputs = {
   memory_in_gbs = 10
 
   image_id            = local.region_vars.locals.image_id
-  ssh_authorized_keys = run_cmd("--terragrunt-quiet", "op", "read", "op://Personal/Pessoal/public key")
+  ssh_authorized_keys = run_cmd("--terragrunt-quiet", "../../k3s/scripts/resolve-ssh-public-key.sh")
 
   # Disco do Longhorn, igual ao da vm-regulus de proposito: com 2 replicas o
   # agendamento compara espaco entre os discos, e assimetria produz decisao
@@ -152,6 +152,27 @@ inputs = {
     # para as duas VMs; e este iptables que faz a diferenciacao por host.
     apt_retry "iptables-persistent" apt-get -o DPkg::Lock::Timeout=600 install -y iptables-persistent -q
     netfilter-persistent save
+
+    # Mesmo ajuste da vm-regulus: o K3s nao tem --flannel-mtu. Com a interface
+    # base em 1500 antes do agent subir, o Flannel deriva MTU 1450 para o VXLAN
+    # e para os veths dos pods. A unit reaplica isso em todo boot antes do K3s.
+    cat >/etc/systemd/system/oci-network-mtu.service <<'UNIT'
+    [Unit]
+    Description=Limit OCI VNIC MTU for the K3s VXLAN overlay
+    Wants=network-online.target
+    After=network-online.target
+    Before=k3s.service k3s-agent.service
+
+    [Service]
+    Type=oneshot
+    ExecStart=/usr/sbin/ip link set dev enp0s6 mtu 1500
+    RemainAfterExit=yes
+
+    [Install]
+    WantedBy=multi-user.target
+    UNIT
+    systemctl daemon-reload
+    systemctl enable --now oci-network-mtu.service
 
     echo "==> Host pronto. O k3s agent ainda NAO esta instalado."
     echo "    O join acontece por SSH, no deploy.sh, com o token do server."

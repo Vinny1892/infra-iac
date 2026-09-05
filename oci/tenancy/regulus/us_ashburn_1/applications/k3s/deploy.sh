@@ -175,16 +175,15 @@ join_agent() {
   fi
 
   echo "==> Instalando k3s agent na danebola ($agent_ip)..."
-  # --flannel-mtu 1450: mesmo motivo do server — a VCN negocia jumbo frames e o
-  # VXLAN nao entrega payload maior que ~1450. Sem isso o trafego pod->pod e
-  # pod->API atravessa o overlay com pacotes que morrem silenciosamente (ver
-  # comentario do install do server na unit applications/compute/vm).
+  # O MTU nao vai como flag: K3s v1.36 nao oferece --flannel-mtu. O cloud-init
+  # da unit danebola ja limitou enp0s6 a 1500 antes daqui, entao o Flannel deriva
+  # MTU 1450 para o VXLAN e para os veths.
   ssh -i "$SSH_KEY" -p "$SSH_PORT" $SSH_OPTS "$SSH_USER@$agent_ip" \
     "curl -sfL https://get.k3s.io \
        | sudo INSTALL_K3S_VERSION='$version' \
               K3S_URL='https://$server_ip:6443' \
               K3S_TOKEN='$token' \
-              sh -s - agent --node-label workload=minecraft --flannel-mtu 1450"
+              sh -s - agent --node-label workload=minecraft"
 
   echo "==> Aguardando a danebola aparecer Ready no cluster..."
   local i
@@ -791,6 +790,7 @@ for arg in "$@"; do
     --use-mercurio-key)
       SSH_KEY_REF="$MERCURIO_SSH_KEY_REF"
       SSH_PUBLIC_KEY_REF="$MERCURIO_SSH_PUBLIC_KEY_REF"
+      export K3S_USE_MERCURIO_KEY=true
       # A mesma service account que da ao agente acesso ao vault Lab-IAC e
       # entregue ao External Secrets Operator. Sem esta exportacao o Terragrunt
       # tentaria buscar no vault IAM o token pessoal do fluxo do operador — um

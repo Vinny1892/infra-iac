@@ -17,6 +17,24 @@ backup_minecraft_world() {
   # O destroy abaixo remove todos os PVCs. Para o mundo do Minecraft isso so e
   # seguro depois que o Job fizer save-all via RCON e o Longhorn confirmar que
   # a copia remota no S3 terminou. Falha fechada: nao perder mundo silenciosamente.
+  #
+  # Se uma tentativa anterior concluiu o backup mas o Job falhou depois (por
+  # exemplo, o proxy do Service escolheu um manager inacessivel e a chamada foi
+  # repetida manualmente), o operador pode informar o backup ja verificado. Nao
+  # e um bypass cego: estado e volume sao conferidos no Longhorn antes de pular.
+  if [ -n "${MINECRAFT_VERIFIED_BACKUP:-}" ]; then
+    local expected_volume verified_state verified_volume
+    expected_volume=$($KUBECTL -n minecraft get pvc minecraft-data -o jsonpath='{.spec.volumeName}')
+    verified_state=$($KUBECTL -n longhorn-system get "backup/$MINECRAFT_VERIFIED_BACKUP" -o jsonpath='{.status.state}')
+    verified_volume=$($KUBECTL -n longhorn-system get "backup/$MINECRAFT_VERIFIED_BACKUP" -o jsonpath='{.metadata.labels.backup-volume}')
+    if [ "$verified_state" != "Completed" ] || [ "$verified_volume" != "$expected_volume" ]; then
+      echo "ERROR: backup informado nao esta Completed ou pertence a outro volume."
+      exit 1
+    fi
+    echo "==> Backup remoto final ja verificado: $MINECRAFT_VERIFIED_BACKUP ($expected_volume)."
+    return 0
+  fi
+
   if ! $KUBECTL get cronjob minecraft-longhorn-backup -n minecraft >/dev/null 2>&1; then
     echo "==> Minecraft backup CronJob nao encontrado; pulando (app ainda nao instalado)."
     return 0
