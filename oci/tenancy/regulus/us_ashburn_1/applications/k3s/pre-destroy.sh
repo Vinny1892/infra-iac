@@ -18,6 +18,14 @@ backup_minecraft_world() {
   # seguro depois que o Job fizer save-all via RCON e o Longhorn confirmar que
   # a copia remota no S3 terminou. Falha fechada: nao perder mundo silenciosamente.
   #
+  # Em deploy parcial o root app ainda pode nao ter criado o PVC. Nesse caso nao
+  # existe mundo montado neste cluster para salvar; o marcador local do ultimo
+  # backup remoto e preservado para a proxima restauracao.
+  if ! $KUBECTL -n minecraft get pvc minecraft-data >/dev/null 2>&1; then
+    echo "==> PVC minecraft-data nao encontrado; nenhum dado local a salvar."
+    return 0
+  fi
+
   # Se uma tentativa anterior concluiu o backup mas o Job falhou depois (por
   # exemplo, o proxy do Service escolheu um manager inacessivel e a chamada foi
   # repetida manualmente), o operador pode informar o backup ja verificado. Nao
