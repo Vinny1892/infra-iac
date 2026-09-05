@@ -773,6 +773,15 @@ for arg in "$@"; do
     --use-mercurio-key)
       SSH_KEY_REF="$MERCURIO_SSH_KEY_REF"
       SSH_PUBLIC_KEY_REF="$MERCURIO_SSH_PUBLIC_KEY_REF"
+      # A mesma service account que da ao agente acesso ao vault Lab-IAC e
+      # entregue ao External Secrets Operator. Sem esta exportacao o Terragrunt
+      # tentaria buscar no vault IAM o token pessoal do fluxo do operador — um
+      # vault que a identidade do Mercurio corretamente nao enxerga.
+      if [ -z "${OP_SERVICE_ACCOUNT_TOKEN:-}" ]; then
+        echo "ERROR: --use-mercurio-key exige OP_SERVICE_ACCOUNT_TOKEN."
+        exit 1
+      fi
+      export K3S_ONEPASSWORD_SERVICE_ACCOUNT_TOKEN="$OP_SERVICE_ACCOUNT_TOKEN"
       ;;
     deploy|configure-hosts|helms-only|verify|destroy)
       if [ "$MODE_SET" = true ]; then

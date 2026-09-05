@@ -46,12 +46,15 @@ inputs = {
   cloudflare_api_token = run_cmd("--terragrunt-quiet", "op", "read", "op://Lab-IAC/Cloudflare API Token/credential")
   # Credencial que destrava todas as outras: com ela o External Secrets Operator
   # busca os demais segredos direto do 1Password, sem passar por este arquivo.
-  # Vive no vault IAM, separado do Lab-IAC que ela le.
+  # No fluxo do operador, vive no vault IAM, separado do Lab-IAC que ela le. No
+  # fluxo automatizado (`deploy.sh --use-mercurio-key`), o script injeta em
+  # K3S_ONEPASSWORD_SERVICE_ACCOUNT_TOKEN a propria identidade restrita ao
+  # Lab-IAC.
   #
-  # `op item get` em vez de `op read`: o titulo do item contem dois-pontos, que
-  # e separador na sintaxe op:// — `op read` responde "invalid secret reference".
-  # A alternativa seria referenciar pelo ID opaco do item; o nome e mais legivel.
-  onepassword_service_account_token = run_cmd("--terragrunt-quiet", "op", "item", "get", "Service Account Auth Token: K3s", "--vault", "IAM", "--fields", "credencial", "--reveal")
+  # `run_cmd` aponta para um resolver externo porque funcoes em ambos os ramos
+  # de um condicional HCL sao avaliadas durante `terragrunt hcl validate`. O
+  # resolver escolhe exatamente um caminho: env do Mercurio ou item do IAM.
+  onepassword_service_account_token = run_cmd("--terragrunt-quiet", "${get_terragrunt_dir()}/../scripts/resolve-onepassword-token.sh")
   github_owner                      = run_cmd("--terragrunt-quiet", "op", "read", "op://Lab-IAC/GitHub App/owner")
   github_app_id                     = run_cmd("--terragrunt-quiet", "op", "read", "op://Lab-IAC/GitHub App/app_id")
   github_app_installation_id        = run_cmd("--terragrunt-quiet", "op", "read", "op://Lab-IAC/GitHub App/installation_id")
