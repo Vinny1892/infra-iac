@@ -374,6 +374,24 @@ o próximo `deploy.sh deploy` destruiria e recriaria as duas VMs do cluster, num
 apply de aparência rotineira. A instalação pós-boot pelo
 `configure-regulus-host.sh` é idempotente e não toca na instância.
 
+**Para autorizar ou revogar a chave nos hosts: `bash deploy.sh configure-hosts`.**
+Ele roda só o `configure-regulus-host.sh` nas duas VMs, descobrindo a porta de
+cada uma com `detect_ssh_port` — nada de reprovisionar VM, reinstalar helm ou
+re-endurecer sshd. O modo existe porque a chave do mercurio ficou de fora do
+`authorized_keys` por uma janela de 4 minutos: o deploy de 04/09/2026 configurou
+os hosts às 15:08 e o commit que instala a chave entrou às 15:12. O código
+estava certo e nunca rodou, porque o único caminho até ele era o modo `deploy`.
+Passou despercebido por um dia. **Fixar a 22 aqui falaria com o Cowrie**, que
+aceita a conexão e não configura nada — por isso a porta é descoberta por VM.
+
+**Chave privada em campo de texto do 1Password precisa do newline final.** A de
+`op://Lab-IAC/Mercurio SSH` foi gravada sem ele: o campo é texto de um secure
+note, então `op read` devolvia 418 bytes crus e o `ssh` recusava com `invalid
+format` — mensagem que parece chave corrompida, não chave a um caractere de
+funcionar. Corrigido no cofre em 05/09/2026 (419 bytes; o 1Password preserva o
+`\n` final, não apara). Ao criar ou consumir chave privada num campo desses,
+valide com `ssh-keygen -lf` antes de confiar.
+
 ### Acesso SSH da Regulus e o honeypot na 22
 
 **O SSH real da `vm-regulus` fica na porta 62222. A porta 22 é do honeypot (Cowrie) e não dá acesso a nada.**

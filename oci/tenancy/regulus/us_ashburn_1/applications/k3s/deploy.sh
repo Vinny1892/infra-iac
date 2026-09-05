@@ -190,6 +190,11 @@ join_agent() {
 
 configure_regulus_host() {
   local vm_ip="$1"
+  # Porta explicita, e nao a global $SSH_PORT, pelo mesmo motivo do
+  # detect_ssh_port: no modo configure-hosts as duas VMs ja estao endurecidas e
+  # cada uma pode estar numa porta diferente da outra. No modo deploy o
+  # argumento e omitido e o default reproduz o comportamento antigo.
+  local port="${3:-$SSH_PORT}"
   local script_b64 public_key_b64 mercurio_key_b64
 
   # O plugin "Compute Instance Run Command" nao e exposto nesta instancia
@@ -208,9 +213,40 @@ configure_regulus_host() {
   fi
 
   echo "==> Configurando chaves SSH e volume do Longhorn em ${2:-$vm_ip}..."
-  ssh -i "$SSH_KEY" -p "$SSH_PORT" $SSH_OPTS "$SSH_USER@$vm_ip" \
+  ssh -i "$SSH_KEY" -p "$port" $SSH_OPTS "$SSH_USER@$vm_ip" \
     "printf '%s' '$script_b64' | base64 --decode | sudo REGULUS_SSH_PUBLIC_KEY_B64='$public_key_b64' MERCURIO_SSH_PUBLIC_KEY_B64='$mercurio_key_b64' bash"
   echo "Host ${2:-$vm_ip} configurado."
+}
+
+# Reaplica o configure-regulus-host.sh nas duas VMs, sem tocar em mais nada.
+#
+# Existe porque autorizar ou revogar uma chave nao pode custar um ciclo de
+# destroy/deploy. A chave do mercurio ficou de fora do authorized_keys por uma
+# janela de 4 minutos: o deploy de 04/09/2026 configurou os hosts as 15:08 e o
+# commit que instala a chave entrou as 15:12. O script estava certo — so nunca
+# rodou com ele, porque configure_regulus_host so era alcancavel pelo modo
+# `deploy`, que reprovisiona VM, reinstala helms e re-endurece o sshd.
+#
+# A porta e descoberta por VM: aqui as maquinas ja passaram pelo harden, entao
+# assumir a 22 falaria com o Cowrie — que aceita a conexao e nao configura
+# nada.
+configure_hosts() {
+  local vm_ip danebola_ip
+
+  vm_ip=$( (cd "$OCI_UNIT_DIR/applications/compute/vm" && get_vm_ip) )
+  if [ -z "${vm_ip:-}" ]; then
+    echo "ERROR: IP da vm-regulus indisponivel; a unit tem state?"
+    exit 1
+  fi
+
+  danebola_ip=$(get_danebola_ip)
+  if [ -z "${danebola_ip:-}" ]; then
+    echo "ERROR: IP da danebola indisponivel; a unit tem state?"
+    exit 1
+  fi
+
+  configure_regulus_host "$vm_ip" "vm-regulus" "$(detect_ssh_port "$vm_ip")"
+  configure_regulus_host "$danebola_ip" "danebola" "$(detect_ssh_port "$danebola_ip")"
 }
 
 # Move o sshd da 22 para a porta alta, liberando a 22 para o honeypot.
@@ -757,6 +793,11 @@ case "$MODE" in
     deploy_root_app
     verify
     ;;
+  configure-hosts)
+    preflight_check
+    prepare_ssh_key
+    configure_hosts
+    ;;
   helms-only)
     preflight_check
     deploy_helms
@@ -773,7 +814,7 @@ case "$MODE" in
     destroy
     ;;
   *)
-    echo "Usage: $0 [deploy|helms-only|verify|destroy]"
+    echo "Usage: $0 [deploy|configure-hosts|helms-only|verify|destroy]"
     exit 1
     ;;
 esac
