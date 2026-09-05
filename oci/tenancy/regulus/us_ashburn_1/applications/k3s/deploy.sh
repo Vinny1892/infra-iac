@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Ferramentas instaladas no escopo do usuario (como o kubectl usado pelo
+# pre-destroy) precisam estar disponiveis tambem em shells nao interativos.
+export PATH="$HOME/.local/bin:$PATH"
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 OCI_UNIT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"  # us_ashburn_1/
 
@@ -682,6 +686,20 @@ verify() {
 }
 
 destroy() {
+  # O pre-destroy usa kubectl local. Atualizar o kubeconfig aqui evita depender
+  # de um arquivo deixado por deploy anterior — ele pode nao existir em uma
+  # maquina de administracao nova ou apontar para IP antigo apos replacement.
+  local cleanup_vm_ip cleanup_vm_port
+  cleanup_vm_ip=$(cd "$OCI_UNIT_DIR/applications/compute/vm" && get_vm_ip) || true
+  if [ -n "${cleanup_vm_ip:-}" ]; then
+    cleanup_vm_port=$(detect_ssh_port "$cleanup_vm_ip")
+    SSH_PORT="$cleanup_vm_port"
+    fetch_kubeconfig "$cleanup_vm_ip"
+  elif [ ! -f "$KUBECONFIG_PATH" ]; then
+    echo "ERROR: VM indisponivel e kubeconfig local inexistente; cleanup inseguro."
+    exit 1
+  fi
+
   echo "==> Pre-destroy cleanup..."
   bash "$SCRIPT_DIR/pre-destroy.sh"
 
