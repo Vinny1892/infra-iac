@@ -199,21 +199,28 @@ inputs = {
     apt_retry "iptables-persistent" apt-get -o DPkg::Lock::Timeout=600 install -y iptables-persistent -q
     netfilter-persistent save
 
+    # MTU do overlay: a VCN da OCI negocia jumbo frames (MTU 8950) na enp0s6, e
+    # o flannel herda esse valor para flannel.1, cni0 e veths. Mas o VXLAN
+    # encapsula em UDP e a rede entrega no maximo ~1450 bytes de payload —
+    # pacote maior morre silenciosamente (sem ICMP, sem log). Sintoma real em
+    # 05/09/2026, pos-split das VMs: TCP conectava, handshake TLS travava, todo
+    # pod->API expirava (dial tcp 10.43.0.1:443: i/o timeout) e os controllers
+    # perdiam leader-election em cascata (vm-operator, cainjector, cnpg, CSI).
+    # Ping pequeno passava; DF ping >1400 sobre o overlay nao. --flannel-mtu
+    # corrige flannel.1, cni0 e os veths de forma consistente desde o boot.
     echo "==> Instalando K3s $K3S_VERSION"
-    # --node-external-ip: a VNIC nao recebe mais IP publico efemero (o endereco
-    # vem do IP reservado, anexado apos a criacao da instancia), entao o k3s nao
-    # descobre sozinho o endereco externo e o node ficaria sem ExternalIP.
-    #
-    # O CronJob traefik-patch-external-ip, que era o consumidor citado aqui, foi
-    # removido: com o Service do Traefik em LoadBalancer, quem publica o IP no
-    # status do Ingress e o MetalLB, nao `spec.externalIPs`. A flag permanece
-    # porque o ExternalIP do node e metadado legitimo — mas nenhum consumidor
-    # atual dele foi reconfirmado.
+    # --node-external-ip: REMOVIDO. Com IP reservado anexado a VNIC, o k3s nao
+    # descobre sozinho o endereco externo — mas o unico consumidor dessa flag
+    # (CronJob traefik-patch-external-ip) foi removido ha tempos. Pior: ela
+    # fazia o endpoint do service `kubernetes` ser o IP PUBLICO, forcando todo
+    # pod->API a hairpin pela borda da OCI em vez de falar com o node vizinho
+    # pelo privado. O ExternalIP do node e metadado; se voltar a ser preciso,
+    # volta como anotacao, nao como endereco de endpoint.
     curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION="$K3S_VERSION" sh -s - server \
       --write-kubeconfig-mode 644 \
       --disable=traefik \
       --disable=servicelb \
-      --node-external-ip "$PUBLIC_IP" \
+      --flannel-mtu 1450 \
       --tls-san "$PUBLIC_IP" \
       --tls-san "$DNS_NAME"
 

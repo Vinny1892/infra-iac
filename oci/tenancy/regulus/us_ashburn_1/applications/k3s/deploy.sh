@@ -165,12 +165,16 @@ join_agent() {
   fi
 
   echo "==> Instalando k3s agent na danebola ($agent_ip)..."
+  # --flannel-mtu 1450: mesmo motivo do server — a VCN negocia jumbo frames e o
+  # VXLAN nao entrega payload maior que ~1450. Sem isso o trafego pod->pod e
+  # pod->API atravessa o overlay com pacotes que morrem silenciosamente (ver
+  # comentario do install do server na unit applications/compute/vm).
   ssh -i "$SSH_KEY" -p "$SSH_PORT" $SSH_OPTS "$SSH_USER@$agent_ip" \
     "curl -sfL https://get.k3s.io \
        | sudo INSTALL_K3S_VERSION='$version' \
               K3S_URL='https://$server_ip:6443' \
               K3S_TOKEN='$token' \
-              sh -s - agent --node-label workload=minecraft"
+              sh -s - agent --node-label workload=minecraft --flannel-mtu 1450"
 
   echo "==> Aguardando a danebola aparecer Ready no cluster..."
   local i

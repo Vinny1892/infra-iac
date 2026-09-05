@@ -137,6 +137,12 @@ inputs = {
     iptables -I INPUT -p tcp --dport "$SSH_PORT" -j ACCEPT
     iptables -I INPUT -p tcp --dport 22    -j ACCEPT
     iptables -I INPUT -p tcp --dport 10250 -j ACCEPT
+    # 9100: node-exporter (DaemonSet hostNetwork). O vmagent raspa de dentro de
+    # um pod na vm-regulus; sem esta regra o trafego cross-node morre no REJECT
+    # final do INPUT da imagem e o alvo fica "down" no VictoriaMetrics — foi o
+    # sintoma de 05/09/2026: pod Running/Ready, localhost:9100 respondendo 200,
+    # scrape sempre falhando.
+    iptables -I INPUT -p tcp --dport 9100 -j ACCEPT
     iptables -I INPUT -p udp --dport 8472  -j ACCEPT
 
     # 80, 443 e 25565 ficam FECHADAS aqui de proposito, ao contrario da
