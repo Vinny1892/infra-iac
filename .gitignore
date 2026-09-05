@@ -19,3 +19,6 @@ tests/fixtures/**/.terraform/
 tests/fixtures/**/.terraform.lock.hcl
 tests/fixtures/k3s_extracted/
 coverage.html
+# Nome do backup final do Minecraft, escrito pelo pre-destroy.sh e lido pelo
+# deploy.sh. E estado de uma execucao, nao configuracao: muda a cada destroy.
+oci/tenancy/regulus/us_ashburn_1/applications/k3s/.ultimo-backup-minecraft

@@ -468,27 +468,57 @@ restore_minecraft_data() {
     exit 1
   fi
 
+  # Restaura o backup que o pre-destroy registrou, NAO "o mais recente".
+  #
+  # O catalogo do Longhorn e populado por uma sincronizacao assincrona a partir
+  # do S3, e num cluster recem-criado ele comeca vazio e vai enchendo. A versao
+  # anterior esperava aparecer QUALQUER backup do minecraft e pegava o mais novo
+  # da lista — que, no meio da sincronizacao, e o mais novo dos que ja chegaram,
+  # nao o mais novo que existe.
+  #
+  # Custou o mundo em 04/09/2026: backup final pronto as 18:19 UTC, catalogo o
+  # indexou as 19:15, restore rodou entre os dois e escolheu um backup de 02/09.
+  # O deploy imprimiu "Backup do Minecraft restaurado" e estava tecnicamente
+  # certo — restaurou, so que o errado.
+  #
+  # Esperar mais tempo nao resolveria: nao existe sinal de "a sincronizacao
+  # terminou", so de "ainda nao terminou". Esperar por um NOME especifico, sim:
+  # ou ele aparece, ou o deploy falha alto em vez de restaurar outra coisa.
+  local backup_record="$SCRIPT_DIR/.ultimo-backup-minecraft"
+  local wanted_backup=""
+  [ -f "$backup_record" ] && wanted_backup=$(tr -d '[:space:]' < "$backup_record")
+
+  if [ -z "$wanted_backup" ]; then
+    echo "ERROR: $backup_record nao existe ou esta vazio."
+    echo "  Esse arquivo e escrito pelo pre-destroy.sh com o nome do backup final."
+    echo "  Sem ele, restaurar significaria adivinhar — e foi adivinhando que o"
+    echo "  mundo voltou dois dias e meio em 04/09/2026. Deploy cancelado."
+    echo "  Para restaurar um backup especifico a mao, escreva o nome dele ali."
+    exit 1
+  fi
+
+  echo "==> Aguardando o backup $wanted_backup aparecer no catalogo..."
   local backup_url=""
   for i in $(seq 1 60); do
-    backup_url=$("${kubectl_cmd[@]}" -n longhorn-system get backups.longhorn.io -o json 2>/dev/null \
-      | jq -r '[.items[]
-          | select(.status.state == "Completed")
-          | select(((.status.labels.KubernetesStatus // .spec.labels.KubernetesStatus // "{}") | fromjson? // {})
-            | .namespace == "minecraft" and .pvcName == "minecraft-data")]
-        | sort_by(.status.backupCreatedAt // .metadata.creationTimestamp)
-        | last
-        | .status.url // empty' || true)
-    if [ -n "$backup_url" ]; then
+    backup_url=$("${kubectl_cmd[@]}" -n longhorn-system get backups.longhorn.io \
+      "$wanted_backup" -o jsonpath='{.status.url}' 2>/dev/null || true)
+    local state
+    state=$("${kubectl_cmd[@]}" -n longhorn-system get backups.longhorn.io \
+      "$wanted_backup" -o jsonpath='{.status.state}' 2>/dev/null || true)
+    if [ -n "$backup_url" ] && [ "$state" = "Completed" ]; then
       break
     fi
-    echo "  Backup do Minecraft ainda nao apareceu no catalogo ($i/60); aguardando 10s..."
+    backup_url=""
+    echo "  ainda nao sincronizado (estado='${state:-ausente}') ($i/60); aguardando 10s..."
     sleep 10
   done
   if [ -z "$backup_url" ]; then
-    echo "ERROR: nenhum backup completo do PVC minecraft/minecraft-data foi encontrado."
-    echo "  Recusando criar um volume vazio durante uma recriacao do cluster."
+    echo "ERROR: o backup $wanted_backup nao apareceu Completed no catalogo em 10 min."
+    echo "  Recusando restaurar outro backup no lugar dele, e recusando criar"
+    echo "  volume vazio. Verifique o backupstore no S3 antes de prosseguir."
     exit 1
   fi
+  echo "  encontrado: $backup_url"
 
   echo "==> Criando StorageClass de restauracao e PVC do Minecraft..."
   jq -n --arg from_backup "$backup_url" '{

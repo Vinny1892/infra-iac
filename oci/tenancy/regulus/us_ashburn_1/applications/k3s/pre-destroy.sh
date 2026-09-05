@@ -63,7 +63,45 @@ backup_minecraft_world() {
     exit 1
   fi
 
-  echo "==> Backup remoto final do Minecraft concluido."
+  # Registra QUAL backup foi feito, para o deploy restaurar exatamente este.
+  #
+  # Sem isto o restore escolhia "o mais recente do catalogo do Longhorn", e o
+  # catalogo e populado por uma sincronizacao assincrona a partir do S3. Num
+  # cluster recem-criado ele comeca vazio e vai enchendo; o restore encontrava
+  # uma lista PARCIAL, pegava o mais novo dela e seguia satisfeito.
+  #
+  # Aconteceu em 04/09/2026: o backup final ficou pronto as 18:19 UTC, o
+  # catalogo so o indexou as 19:15, e o restore rodou no meio — escolheu um
+  # backup de 02/09. O mundo voltou dois dias e meio atras, e o deploy.sh
+  # imprimiu "Backup do Minecraft restaurado" porque, do ponto de vista dele,
+  # restaurou mesmo. So nao o certo.
+  #
+  # Esperar mais tempo nao conserta: nao ha sinal de que a sincronizacao
+  # terminou, so de que ainda nao terminou. O que conserta e parar de adivinhar
+  # — quem acabou de fazer o backup sabe o nome dele.
+  # Aqui "o mais recente" E confiavel, ao contrario do restore: este cluster
+  # esta vivo ha horas e o catalogo do Longhorn ja esta inteiro sincronizado. O
+  # problema de lista parcial so existe em cluster recem-criado.
+  local backup_name
+  backup_name=$($KUBECTL -n longhorn-system get backups.longhorn.io -o json 2>/dev/null \
+    | jq -r '[.items[]
+        | select(.status.state == "Completed")
+        | select(((.status.labels.KubernetesStatus // .spec.labels.KubernetesStatus // "{}") | fromjson? // {})
+          | .namespace == "minecraft" and .pvcName == "minecraft-data")]
+      | sort_by(.status.backupCreatedAt)
+      | last
+      | .metadata.name // empty' || true)
+
+  if [ -z "${backup_name:-}" ]; then
+    echo "ERROR: backup concluiu mas nao consegui identificar seu nome no Longhorn."
+    echo "  Sem o nome, o deploy voltaria a adivinhar o backup — que e o defeito"
+    echo "  que este registro existe para evitar. Destroy cancelado."
+    exit 1
+  fi
+
+  printf '%s\n' "$backup_name" > "$SCRIPT_DIR/.ultimo-backup-minecraft"
+  echo "==> Backup remoto final do Minecraft concluido: $backup_name"
+  echo "    Nome registrado em .ultimo-backup-minecraft para o proximo deploy."
 }
 
 delete_argocd_applications() {
