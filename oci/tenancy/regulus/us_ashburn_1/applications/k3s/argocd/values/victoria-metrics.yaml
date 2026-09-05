@@ -130,10 +130,11 @@ grafana:
   # divergir do banco, que vive no PVC e so conhece a senha da inicializacao.
   admin:
     existingSecret: grafana-admin
-  # O datasource VictoriaLogs e provisionado pelo proprio chart
-  # (defaultDatasources.victorialogs), mas depende deste plugin. O Grafana
-  # baixa na inicializacao do pod, entao exige saida para a internet.
+  # Os datasources nativos de metricas e logs sao provisionados pelo chart e
+  # precisam dos respectivos plugins. O datasource Prometheus segue como
+  # default; os nativos atendem Explore/MCP sem deixar health 404.
   plugins:
+    - victoriametrics-metrics-datasource
     - victoriametrics-logs-datasource
   resources:
     requests:
