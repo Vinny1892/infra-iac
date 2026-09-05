@@ -639,7 +639,13 @@ verify() {
 
   echo "--- Verificacoes ---"
 
-  if "${kc[@]}" get nodes --no-headers 2>/dev/null | grep -q ' Ready'; then
+  # Nao usar `kubectl | grep -q` sob pipefail: quando grep encontra a primeira
+  # linha ele fecha o pipe, kubectl recebe SIGPIPE e a pipeline vira falha mesmo
+  # com nodes Ready. Capture a saida inteira antes de avaliar.
+  local ready_conditions
+  ready_conditions=$("${kc[@]}" get nodes \
+    -o jsonpath='{range .items[*]}{range .status.conditions[?(@.type=="Ready")]}{.status}{"\n"}{end}{end}')
+  if [[ "$ready_conditions" == *"True"* ]]; then
     echo "OK: node Ready."
   else
     echo "FALHA: nenhum node Ready."
