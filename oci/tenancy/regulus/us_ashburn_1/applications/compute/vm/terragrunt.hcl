@@ -192,8 +192,10 @@ inputs = {
     # que a porta continua aberta de proposito.
     iptables -I INPUT -p tcp --dport 22   -j ACCEPT
     iptables -I INPUT -p tcp --dport 6443 -j ACCEPT
-    iptables -I INPUT -p tcp --dport 80   -j ACCEPT
-    iptables -I INPUT -p tcp --dport 443  -j ACCEPT
+    iptables -I INPUT -p tcp --dport 80    -j ACCEPT
+    iptables -I INPUT -p tcp --dport 443   -j ACCEPT
+    iptables -I INPUT -p udp --dport 9987  -j ACCEPT
+    iptables -I INPUT -p tcp --dport 30033 -j ACCEPT
     iptables -I INPUT -p tcp --dport 10250 -j ACCEPT
     iptables -I INPUT -p udp --dport 8472  -j ACCEPT
     apt_retry "iptables-persistent" apt-get -o DPkg::Lock::Timeout=600 install -y iptables-persistent -q

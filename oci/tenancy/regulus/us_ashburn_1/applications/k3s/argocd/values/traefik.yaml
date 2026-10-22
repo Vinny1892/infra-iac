@@ -23,6 +23,18 @@ ports:
       default: true
     hostPort: 25565
     protocol: TCP
+  teamspeak-voice:
+    port: 9987
+    expose:
+      default: true
+    hostPort: 9987
+    protocol: UDP
+  teamspeak-file:
+    port: 30033
+    expose:
+      default: true
+    hostPort: 30033
+    protocol: TCP
 
 providers:
   kubernetesCRD:

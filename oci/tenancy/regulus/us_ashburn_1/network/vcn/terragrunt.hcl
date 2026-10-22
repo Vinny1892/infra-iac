@@ -53,6 +53,9 @@ inputs = {
     { source = "0.0.0.0/0", protocol = "6", tcp_options = { min = 443, max = 443 } },
     # Minecraft Java. O RCON (25575) continua exclusivamente interno no K3s.
     { source = "0.0.0.0/0", protocol = "6", tcp_options = { min = 25565, max = 25565 } },
+    # TeamSpeak 6. Web/SSH Query continuam exclusivamente internos.
+    { source = "0.0.0.0/0", protocol = "17", udp_options = { min = 9987, max = 9987 }, description = "TeamSpeak 6 - voz" },
+    { source = "0.0.0.0/0", protocol = "6", tcp_options = { min = 30033, max = 30033 }, description = "TeamSpeak 6 - transferencia de arquivo" },
     { source = "0.0.0.0/0", protocol = "6", tcp_options = { min = 6443, max = 6443 } },
     # Honeypot: a 22 nao serve mais SSH real, o trafego cai no Cowrie (hostPort
     # 22 -> containerPort 2222) no namespace honeypot.

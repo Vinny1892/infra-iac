@@ -54,6 +54,17 @@ resource "cloudflare_record" "minecraft" {
   ttl     = 1
 }
 
+# TeamSpeak tambem usa conexoes diretas UDP/TCP, que o proxy HTTP da Cloudflare
+# nao transporta no plano comum. Por isso o registro e DNS-only.
+resource "cloudflare_record" "teamspeak" {
+  zone_id = var.zone_id
+  name    = "teamspeak"
+  type    = "A"
+  content = var.vm_ip
+  proxied = false
+  ttl     = 1
+}
+
 output "k3s_ip" {
   value = var.vm_ip
 }

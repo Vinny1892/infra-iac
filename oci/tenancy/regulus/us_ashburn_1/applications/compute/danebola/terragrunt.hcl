@@ -145,8 +145,8 @@ inputs = {
     iptables -I INPUT -p tcp --dport 9100 -j ACCEPT
     iptables -I INPUT -p udp --dport 8472  -j ACCEPT
 
-    # 80, 443 e 25565 ficam FECHADAS aqui de proposito, ao contrario da
-    # vm-regulus. O Traefik e DaemonSet e vai subir nesta VM tambem, com
+    # 80, 443, 25565, 9987/udp e 30033 ficam FECHADAS aqui de proposito, ao
+    # contrario da vm-regulus. O Traefik e DaemonSet e vai subir nesta VM tambem, com
     # hostPort nessas portas — mas quem deve receber trafego de fora e so o IP
     # reservado da vm-regulus. A security list e por subnet e abre essas portas
     # para as duas VMs; e este iptables que faz a diferenciacao por host.

@@ -1,0 +1,70 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: teamspeak
+  namespace: teamspeak
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: teamspeak
+  template:
+    metadata:
+      labels:
+        app: teamspeak
+    spec:
+      containers:
+        - name: teamspeak
+          # TS6 ainda e beta. Versao e manifest multi-arch pinados para impedir
+          # que um restart atualize silenciosamente o banco persistente.
+          image: teamspeaksystems/teamspeak6-server:6.0.0-beta13.1@sha256:d845f803aecf842c2df034c959c23ff2462357bacafb3807500885c5ec170fa1
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: TSSERVER_LICENSE_ACCEPTED
+              value: accept
+            - name: TSSERVER_DEFAULT_PORT
+              value: "9987"
+            - name: TSSERVER_FILE_TRANSFER_PORT
+              value: "30033"
+            # Query HTTP/SSH permanece desabilitada. Administracao inicial e
+            # feita pelo privilege key gerado no primeiro boot.
+            - name: TSSERVER_QUERY_HTTP_ENABLED
+              value: "0"
+            - name: TSSERVER_QUERY_SSH_ENABLED
+              value: "0"
+          ports:
+            - name: voice
+              containerPort: 9987
+              protocol: UDP
+            - name: file-transfer
+              containerPort: 30033
+              protocol: TCP
+          startupProbe:
+            tcpSocket:
+              port: file-transfer
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            tcpSocket:
+              port: file-transfer
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: file-transfer
+            periodSeconds: 30
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 1Gi
+          volumeMounts:
+            - name: data
+              mountPath: /var/tsserver
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: teamspeak-data

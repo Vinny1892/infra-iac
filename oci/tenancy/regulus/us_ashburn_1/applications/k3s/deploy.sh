@@ -203,6 +203,7 @@ join_agent() {
 
 configure_regulus_host() {
   local vm_ip="$1"
+  local host_role="${2:-vm-regulus}"
   # Porta explicita, e nao a global $SSH_PORT, pelo mesmo motivo do
   # detect_ssh_port: no modo configure-hosts as duas VMs ja estao endurecidas e
   # cada uma pode estar numa porta diferente da outra. No modo deploy o
@@ -225,10 +226,10 @@ configure_regulus_host() {
     exit 1
   fi
 
-  echo "==> Configurando chaves SSH e volume do Longhorn em ${2:-$vm_ip}..."
+  echo "==> Configurando chaves SSH, firewall e volume do Longhorn em $host_role..."
   ssh -i "$SSH_KEY" -p "$port" $SSH_OPTS "$SSH_USER@$vm_ip" \
-    "printf '%s' '$script_b64' | base64 --decode | sudo REGULUS_SSH_PUBLIC_KEY_B64='$public_key_b64' MERCURIO_SSH_PUBLIC_KEY_B64='$mercurio_key_b64' bash"
-  echo "Host ${2:-$vm_ip} configurado."
+    "printf '%s' '$script_b64' | base64 --decode | sudo HOST_ROLE='$host_role' REGULUS_SSH_PUBLIC_KEY_B64='$public_key_b64' MERCURIO_SSH_PUBLIC_KEY_B64='$mercurio_key_b64' bash"
+  echo "Host $host_role configurado."
 }
 
 # Reaplica o configure-regulus-host.sh nas duas VMs, sem tocar em mais nada.

@@ -1,0 +1,27 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: teamspeak
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/Vinny1892/infra-iac.git
+    targetRevision: master
+    path: oci/tenancy/regulus/us_ashburn_1/applications/k3s/argocd/manifests/teamspeak
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: teamspeak
+  syncPolicy:
+    automated:
+      # Preserva banco SQLite, identidade e configuracao do servidor se a
+      # Application for removida acidentalmente do Git.
+      prune: false
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

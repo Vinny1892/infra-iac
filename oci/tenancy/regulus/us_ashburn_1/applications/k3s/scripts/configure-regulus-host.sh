@@ -48,6 +48,23 @@ install_ssh_key() {
   fi
 }
 
+configure_application_firewall() {
+  # A security list e compartilhada pela subnet, mas somente o IP reservado da
+  # vm-regulus deve receber trafego de aplicacao. A danebola continua fechada no
+  # INPUT, mesmo com o Traefik DaemonSet usando os mesmos hostPorts nela.
+  if [ "${HOST_ROLE:-}" != "vm-regulus" ]; then
+    echo "  Portas publicas de aplicacao permanecem fechadas em ${HOST_ROLE:-host desconhecido}."
+    return 0
+  fi
+
+  iptables -C INPUT -p udp --dport 9987 -j ACCEPT 2>/dev/null || \
+    iptables -I INPUT -p udp --dport 9987 -j ACCEPT
+  iptables -C INPUT -p tcp --dport 30033 -j ACCEPT 2>/dev/null || \
+    iptables -I INPUT -p tcp --dport 30033 -j ACCEPT
+  netfilter-persistent save
+  echo "  Portas do TeamSpeak 6 liberadas na vm-regulus."
+}
+
 wait_for_device() {
   for attempt in $(seq 1 60); do
     if [ -b "$DEVICE" ]; then
@@ -131,6 +148,7 @@ configure_longhorn_volume() {
 }
 
 install_ssh_key
+configure_application_firewall
 configure_longhorn_volume
 
 findmnt "$LONGHORN_DIR"

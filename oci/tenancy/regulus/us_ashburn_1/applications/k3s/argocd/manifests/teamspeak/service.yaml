@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: teamspeak
+  namespace: teamspeak
+spec:
+  selector:
+    app: teamspeak
+  ports:
+    - name: voice
+      port: 9987
+      targetPort: voice
+      protocol: UDP
+    - name: file-transfer
+      port: 30033
+      targetPort: file-transfer
+      protocol: TCP
