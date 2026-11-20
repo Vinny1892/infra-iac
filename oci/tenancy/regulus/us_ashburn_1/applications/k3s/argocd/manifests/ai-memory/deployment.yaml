@@ -41,6 +41,8 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /data
+            - name: backups
+              mountPath: /backups
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
@@ -72,3 +74,6 @@ spec:
         - name: data
           persistentVolumeClaim:
             claimName: ai-memory-data
+        - name: backups
+          persistentVolumeClaim:
+            claimName: ai-memory-backups

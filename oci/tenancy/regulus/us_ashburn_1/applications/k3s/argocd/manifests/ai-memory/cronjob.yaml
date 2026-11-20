@@ -30,6 +30,14 @@ spec:
           containers:
             - name: backup
               image: docker.io/akitaonrails/ai-memory:3.4.7
+              env:
+                - name: AI_MEMORY_SERVER_URL
+                  value: http://ai-memory.ai-memory.svc:49374
+                - name: AI_MEMORY_AUTH_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: ai-memory-auth
+                      key: token
               command:
                 - /bin/sh
                 - -c
