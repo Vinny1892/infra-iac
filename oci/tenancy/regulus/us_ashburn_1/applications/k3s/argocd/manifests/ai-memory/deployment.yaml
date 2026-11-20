@@ -38,6 +38,10 @@ spec:
               value: memory.vinny.dev.br,ai-memory.ai-memory.svc,localhost,127.0.0.1
             - name: AI_MEMORY_ENABLE_WEB
               value: "true"
+            - name: AI_MEMORY_LLM_PROVIDER
+              value: openai-oauth
+            - name: AI_MEMORY_LLM_MODEL
+              value: gpt-5.6-sol
           volumeMounts:
             - name: data
               mountPath: /data
