@@ -1,0 +1,62 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: ai-memory-backup
+  namespace: ai-memory
+spec:
+  schedule: "0 4 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: OnFailure
+          affinity:
+            podAffinity:
+              requiredDuringSchedulingIgnoredDuringExecution:
+                - labelSelector:
+                    matchLabels:
+                      app: ai-memory
+                  topologyKey: kubernetes.io/hostname
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
+            fsGroup: 1000
+            runAsNonRoot: true
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: backup
+              image: docker.io/akitaonrails/ai-memory:3.4.7
+              command:
+                - /bin/sh
+                - -c
+              args:
+                - >-
+                  ai-memory backup --data-dir /data --to /backups/ai-memory-$(date +%F).tar.gz &&
+                  ls -1t /backups/ai-memory-*.tar.gz | tail -n +8 | xargs -r rm --
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop:
+                    - ALL
+              resources:
+                requests:
+                  cpu: 20m
+                  memory: 64Mi
+                limits:
+                  memory: 256Mi
+              volumeMounts:
+                - name: data
+                  mountPath: /data
+                - name: backups
+                  mountPath: /backups
+          volumes:
+            - name: data
+              persistentVolumeClaim:
+                claimName: ai-memory-data
+            - name: backups
+              persistentVolumeClaim:
+                claimName: ai-memory-backups

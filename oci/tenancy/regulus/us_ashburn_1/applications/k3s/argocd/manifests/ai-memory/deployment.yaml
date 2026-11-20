@@ -1,0 +1,74 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ai-memory
+  namespace: ai-memory
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: ai-memory
+  template:
+    metadata:
+      labels:
+        app: ai-memory
+    spec:
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: ai-memory
+          image: docker.io/akitaonrails/ai-memory:3.4.7
+          ports:
+            - name: http
+              containerPort: 49374
+          env:
+            - name: AI_MEMORY_AUTH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: ai-memory-auth
+                  key: token
+            - name: AI_MEMORY_ALLOWED_HOSTS
+              value: memory.vinny.dev.br,ai-memory.ai-memory.svc,localhost,127.0.0.1
+            - name: AI_MEMORY_ENABLE_WEB
+              value: "true"
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 512Mi
+          startupProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 5
+            failureThreshold: 24
+          readinessProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            exec:
+              command:
+                - ai-memory
+                - status
+            periodSeconds: 60
+            timeoutSeconds: 10
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: ai-memory-data
