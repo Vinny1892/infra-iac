@@ -88,6 +88,11 @@ configure_longhorn_volume() {
   local volume_uuid
   volume_uuid=$(blkid -s UUID -o value "$DEVICE")
 
+  # O volume OCI pode crescer in-place via Terragrunt. O kernel enxerga o novo
+  # tamanho sem recriar o filesystem; resize2fs completa a expansao, inclusive
+  # com ext4 montado, e e idempotente quando ja ocupa o dispositivo inteiro.
+  resize2fs "$DEVICE"
+
   if findmnt -rn -S "UUID=$volume_uuid" -T "$LONGHORN_DIR" >/dev/null 2>&1; then
     echo "$DEVICE ja esta montado em $LONGHORN_DIR."
     return 0

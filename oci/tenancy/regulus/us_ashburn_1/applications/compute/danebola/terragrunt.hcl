@@ -60,7 +60,7 @@ inputs = {
   # agendamento compara espaco entre os discos, e assimetria produz decisao
   # dificil de prever. Formatado e montado em /var/lib/longhorn pelo
   # configure-regulus-host.sh, que o deploy.sh roda nas duas VMs.
-  data_volume_size_in_gbs  = 100
+  data_volume_size_in_gbs  = 150
   data_volume_display_name = "danebola-longhorn"
   data_volume_vpus_per_gb  = 10
   data_volume_device       = "/dev/oracleoci/oraclevdb"

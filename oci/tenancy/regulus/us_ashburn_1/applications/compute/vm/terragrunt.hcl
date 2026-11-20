@@ -77,15 +77,15 @@ inputs = {
   # configure-regulus-host.sh (via UUID no fstab), nao pelo cloud-init.
   #
   # ATENCAO: o split estourou a franquia de block storage. Boot (47) + dados
-  # (100) desta VM, mais os mesmos 147 GB da danebola, mais 47 GB de boot da
-  # hermes, dao 341 GB — 141 GB acima dos 200 GB gratuitos. E consequencia
+  # (150) desta VM, mais os mesmos 197 GB da danebola, mais 47 GB de boot do
+  # mercurio, dao 441 GB — 241 GB acima dos 200 GB gratuitos. E consequencia
   # aceita de ter Longhorn com 2 replicas, que e o unico jeito de o cluster
   # sobreviver a perda de um node com os dados intactos.
   #
-  # Os 100 GB aqui e na danebola sao iguais de proposito: o Longhorn agenda
+  # Os 150 GB aqui e na danebola sao iguais de proposito: o Longhorn agenda
   # replicas comparando espaco entre os discos, e disco assimetrico produz
   # decisao de agendamento dificil de prever.
-  data_volume_size_in_gbs  = 100
+  data_volume_size_in_gbs  = 150
   data_volume_display_name = "vm-regulus-longhorn"
   data_volume_vpus_per_gb  = 10
   data_volume_device       = "/dev/oracleoci/oraclevdb"
