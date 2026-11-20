@@ -88,10 +88,44 @@ configure_longhorn_volume() {
   local volume_uuid
   volume_uuid=$(blkid -s UUID -o value "$DEVICE")
 
-  # O volume OCI pode crescer in-place via Terragrunt. O kernel enxerga o novo
-  # tamanho sem recriar o filesystem; resize2fs completa a expansao, inclusive
-  # com ext4 montado, e e idempotente quando ja ocupa o dispositivo inteiro.
-  resize2fs "$DEVICE"
+  # O volume OCI pode crescer in-place via Terragrunt. Tenta a expansao online;
+  # se o ext4 exigir fsck depois do detach/attach da OCI, para o K3s, desmonta,
+  # corrige e expande offline antes de devolver o volume ao Longhorn.
+  if ! resize2fs "$DEVICE"; then
+    local mounted_target=""
+    local resize_k3s_unit=""
+    local fsck_rc=0
+
+    mounted_target=$(findmnt -rn -S "UUID=$volume_uuid" -o TARGET || true)
+    if systemctl is-active --quiet k3s; then
+      resize_k3s_unit="k3s"
+    elif systemctl is-active --quiet k3s-agent; then
+      resize_k3s_unit="k3s-agent"
+    fi
+
+    if [ -n "$resize_k3s_unit" ]; then
+      systemctl stop "$resize_k3s_unit"
+      trap "systemctl start $resize_k3s_unit >/dev/null 2>&1 || true" EXIT
+    fi
+    if [ -n "$mounted_target" ]; then
+      umount "$mounted_target"
+    fi
+
+    e2fsck -pf "$DEVICE" || fsck_rc=$?
+    if [ "$fsck_rc" -gt 1 ]; then
+      echo "ERROR: e2fsck falhou em $DEVICE (rc=$fsck_rc)."
+      exit "$fsck_rc"
+    fi
+    resize2fs "$DEVICE"
+
+    if [ -n "$mounted_target" ]; then
+      mount "$mounted_target"
+    fi
+    if [ -n "$resize_k3s_unit" ]; then
+      systemctl start "$resize_k3s_unit"
+      trap - EXIT
+    fi
+  fi
 
   if findmnt -rn -S "UUID=$volume_uuid" -T "$LONGHORN_DIR" >/dev/null 2>&1; then
     echo "$DEVICE ja esta montado em $LONGHORN_DIR."
