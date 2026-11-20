@@ -297,6 +297,12 @@ module "vpc" { source = "../../../atoms/aws/network/vpc" ... }
 
 ### OCI K3s Cluster Lifecycle
 
+**Gate obrigatorio de custo:** nenhuma mudanca que possa aumentar cobranca
+(shape, volume, VPU, IP, load balancer, trafego, backup ou servico pago) pode
+ser aplicada com autorizacao tecnica generica. Antes do commit/apply, apresentar
+estimativa mensal e alternativa sem custo; executar somente apos consentimento
+expresso do proprietario para aquele impacto financeiro.
+
 **IMPORTANTE: Sempre usar os scripts deploy.sh e destroy.sh - nunca usar kubectl manual para resolver problemas**
 
 ```bash

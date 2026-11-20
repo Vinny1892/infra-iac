@@ -5,12 +5,16 @@
 # split: e a unica configuracao em que perder um no nao perde dado, e em que
 # um pod pode ser reagendado no outro no e ainda achar o volume local.
 #
-# Custo: cada volume ocupa espaco nos DOIS discos de 100 GB. Os 57 GB de PVCs
-# provisionados viram 57 GB em cada no. O Longhorn provisiona fino, entao o
-# consumo real hoje e uma fracao disso, mas o agendamento reserva pelo tamanho
-# declarado.
+# Custo: cada volume ocupa espaco nos DOIS discos de 100 GB. Os PVCs de duas
+# replicas reservam 84 GiB em cada no; o Minecraft adiciona 15 GiB em um no.
+# O consumo fisico observado em 20/11/2026 era de ~40 GiB por no. Para manter
+# os discos em 100 GB sem sacrificar as duas replicas, usamos reserva de 10% e
+# 120% de thin provisioning. O limite fisico minimo continua em 10% livre.
 defaultSettings:
   defaultReplicaCount: 2
+  storageReservedPercentageForDefaultDisk: 10
+  storageMinimalAvailablePercentage: 10
+  storageOverProvisioningPercentage: 120
 
 preUpgradeChecker:
   jobEnabled: false
