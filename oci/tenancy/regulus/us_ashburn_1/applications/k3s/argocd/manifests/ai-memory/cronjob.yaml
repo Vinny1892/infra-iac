@@ -27,8 +27,8 @@ spec:
             runAsNonRoot: true
             seccompProfile:
               type: RuntimeDefault
-          containers:
-            - name: backup
+          initContainers:
+            - name: create-backup
               image: docker.io/akitaonrails/ai-memory:3.4.7
               env:
                 - name: AI_MEMORY_SERVER_URL
@@ -61,6 +61,57 @@ spec:
                   mountPath: /data
                 - name: backups
                   mountPath: /backups
+          containers:
+            - name: upload-s3
+              image: amazon/aws-cli:2.42.1@sha256:b0102d2269f87d8531d931c1a59e248101ace586886e6c077058d94c1c37b846
+              env:
+                - name: AWS_ACCESS_KEY_ID
+                  valueFrom:
+                    secretKeyRef:
+                      name: ai-memory-s3-creds
+                      key: AWS_ACCESS_KEY_ID
+                - name: AWS_SECRET_ACCESS_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: ai-memory-s3-creds
+                      key: AWS_SECRET_ACCESS_KEY
+                - name: AWS_DEFAULT_REGION
+                  value: us-east-1
+                - name: AWS_EC2_METADATA_DISABLED
+                  value: "true"
+              command:
+                - /bin/sh
+                - -c
+              args:
+                - >-
+                  latest=$(ls -1t /backups/ai-memory-*.tar.gz | head -n 1) &&
+                  key="ai-memory/daily/${latest##*/}" &&
+                  aws s3 cp "$latest" "s3://backup-longhorn-k3s/$key"
+                  --only-show-errors --sse AES256 &&
+                  old_keys=$(aws s3api list-objects-v2
+                  --bucket backup-longhorn-k3s --prefix ai-memory/daily/
+                  --query 'sort_by(Contents,&LastModified)[:-7].Key'
+                  --output text) &&
+                  for old_key in $old_keys; do
+                    [ "$old_key" = "None" ] ||
+                    aws s3api delete-object --bucket backup-longhorn-k3s
+                    --key "$old_key" >/dev/null;
+                  done
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop:
+                    - ALL
+              resources:
+                requests:
+                  cpu: 10m
+                  memory: 64Mi
+                limits:
+                  memory: 256Mi
+              volumeMounts:
+                - name: backups
+                  mountPath: /backups
+                  readOnly: true
           volumes:
             - name: data
               persistentVolumeClaim:
