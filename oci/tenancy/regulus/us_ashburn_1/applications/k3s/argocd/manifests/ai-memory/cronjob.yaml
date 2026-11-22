@@ -4,8 +4,7 @@ metadata:
   name: ai-memory-backup
   namespace: ai-memory
 spec:
-  # Temporario para validar a primeira copia remota; volta a 04:00 apos o teste.
-  schedule: "*/5 * * * *"
+  schedule: "0 4 * * *"
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 3
