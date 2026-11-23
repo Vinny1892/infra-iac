@@ -15,6 +15,12 @@ resource "helm_release" "metallb" {
 
   values = [
     yamlencode({
+      # O cluster usa somente L2Advertisement. O backend FRR-K8s e necessario
+      # apenas para BGP/BFD e, habilitado por padrao no chart 0.16.1, mantinha
+      # um DaemonSet extra em cada node sem qualquer peer configurado.
+      frrk8s = {
+        enabled = false
+      }
       speaker = {
         tolerations = [
           {

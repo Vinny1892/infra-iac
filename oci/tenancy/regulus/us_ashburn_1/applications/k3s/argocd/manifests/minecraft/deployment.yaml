@@ -18,7 +18,7 @@ spec:
       # Preso na danebola, o node escravo. O label vem do `--node-label` do
       # join do agent, no deploy.sh.
       #
-      # Sem isto, a colocacao dependeria apenas de o `requests: 7Gi` abaixo nao
+      # Sem isto, a colocacao dependeria apenas de o `requests: 6Gi` abaixo nao
       # caber na vm-regulus (2 OCPU / 8 GB) — aritmetica de scheduler, que da o
       # resultado certo hoje e quebra em silencio no dia em que alguem ajustar o
       # request ou o tamanho de uma das VMs. O jogador nao perde acesso: o
@@ -78,9 +78,10 @@ spec:
               # usar mais nos picos (chunk gen, muitos jogadores), e sem limite
               # ele usa o que estiver ocioso. Reduzir o request nao muda isso.
               cpu: 500m
-              # Memoria continua reservada de verdade: e heap de JVM, nao
-              # comprime, e ficar sem ela derruba o servidor.
-              memory: 7Gi
+              # O request acompanha o heap configurado em 6G. O limite de 8Gi
+              # continua permitindo o overhead da JVM sem reservar 1Gi ocioso
+              # permanentemente no scheduler.
+              memory: 6Gi
             limits:
               memory: 8Gi
           volumeMounts:
