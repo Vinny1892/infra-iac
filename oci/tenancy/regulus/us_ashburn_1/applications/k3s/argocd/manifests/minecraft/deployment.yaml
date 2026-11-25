@@ -4,7 +4,9 @@ metadata:
   name: minecraft
   namespace: minecraft
 spec:
-  replicas: 1
+  # Pausado para liberar capacidade ao piloto do Rakazo. O Deployment, PVC e
+  # rotinas de backup permanecem declarados para permitir retomada sem perda do mundo.
+  replicas: 0
   strategy:
     type: Recreate
   selector:
