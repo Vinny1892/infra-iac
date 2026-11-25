@@ -3,15 +3,23 @@ argocdReleaseOverride: vmks
 
 victoria-metrics-operator:
   resources:
+    # Uso real observado: ~2m CPU / 41Mi. O request anterior (80m/128Mi)
+    # reservava capacidade 40x maior que o consumo. Rightsizing para o piloto
+    # do Rakazo; limits preservados como teto de proteção.
     requests:
-      cpu: 80m
-      memory: 128Mi
+      cpu: 20m
+      memory: 64Mi
     limits:
       cpu: 250m
       memory: 256Mi
 
 vmsingle:
-  enabled: true
+  # Desligado: o pod está travado em ContainerCreating desde 22/11 (staging
+  # path do CSI inválido — PVC não monta) e mantinha o app victoria-metrics
+  # em OutOfSync/Progressing. Sem ele o cluster perde histórico de MÉTRICAS
+  # (logs seguem no vlsingle). Retomar exige consertar o volume Longhorn
+  # antes de religar; o PVC vmsingle-vmks não é apagado por esta mudança.
+  enabled: false
   spec:
     retentionPeriod: 14d
     resources:
@@ -47,9 +55,11 @@ vlsingle:
     # historia, e retencoes diferentes tornam a correlacao confusa.
     retentionPeriod: 14d
     resources:
+      # Uso real observado: ~3m CPU / 88Mi. Rightsizing para o piloto do
+      # Rakazo; limit 1Gi preservado como teto.
       requests:
-        cpu: 100m
-        memory: 256Mi
+        cpu: 50m
+        memory: 128Mi
       limits:
         cpu: 500m
         memory: 1Gi
@@ -72,9 +82,10 @@ vlagent:
     k8sCollector:
       enabled: true
     resources:
+      # Uso real observado: ~2m CPU / 33Mi por node. Rightsizing.
       requests:
-        cpu: 50m
-        memory: 128Mi
+        cpu: 25m
+        memory: 64Mi
       limits:
         cpu: 300m
         memory: 512Mi
@@ -93,9 +104,10 @@ vmagent:
   spec:
     scrapeInterval: 30s
     resources:
+      # Uso real observado: ~7m CPU / 115Mi. Rightsizing.
       requests:
-        cpu: 100m
-        memory: 256Mi
+        cpu: 50m
+        memory: 128Mi
       limits:
         cpu: 300m
         memory: 512Mi
@@ -137,9 +149,11 @@ grafana:
     - victoriametrics-metrics-datasource
     - victoriametrics-logs-datasource
   resources:
+    # Uso real observado: ~10m CPU / 421Mi. Memória não comprime demais:
+    # request abaixo do uso dá eviction risk; 384Mi cobre o pico com folga.
     requests:
-      cpu: 100m
-      memory: 256Mi
+      cpu: 50m
+      memory: 384Mi
     limits:
       cpu: 300m
       memory: 512Mi
@@ -164,18 +178,20 @@ grafana:
           - grafana-k3s.vinny.dev.br
 
 prometheus-node-exporter:
+  # Uso real observado: ~1m CPU / 30Mi por node. Rightsizing.
   resources:
     requests:
-      cpu: 30m
+      cpu: 10m
       memory: 32Mi
     limits:
       cpu: 100m
       memory: 64Mi
 
 kube-state-metrics:
+  # Uso real observado: ~1m CPU / 31Mi. Rightsizing.
   resources:
     requests:
-      cpu: 50m
+      cpu: 20m
       memory: 64Mi
     limits:
       cpu: 150m

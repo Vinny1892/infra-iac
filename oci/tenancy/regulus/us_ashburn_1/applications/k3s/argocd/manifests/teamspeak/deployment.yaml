@@ -4,7 +4,10 @@ metadata:
   name: teamspeak
   namespace: teamspeak
 spec:
-  replicas: 1
+  # Pausado para liberar capacidade ao piloto do Rakazo. Deployment, PVC
+  # (SQLite/identidade), Service e rotas permanecem declarados; retomada é
+  # um commit de replicas: 1.
+  replicas: 0
   strategy:
     type: Recreate
   selector:
