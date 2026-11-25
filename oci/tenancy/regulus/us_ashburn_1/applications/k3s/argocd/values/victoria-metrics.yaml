@@ -146,7 +146,11 @@ grafana:
     # Com RollingUpdate o pod novo agenda no outro node e falha em anexar o
     # volume (FailedAttachVolume: already used by pod antigo) — observado no
     # rollout de 25/11, com o app preso em ProgressDeadlineExceeded.
+    # rollingUpdate: null é OBRIGATÓRIO: o chart injeta o default do tipo junto
+    # com o nosso override e a API rejeita o patch ("may not be specified when
+    # strategy type is 'Recreate'").
     type: Recreate
+    rollingUpdate: null
   # Senha do admin vem do 1Password via ExternalSecret (manifests/monitoring/).
   # Sem isto o chart gera `randAlphaNum 40` a cada render e o Secret passa a
   # divergir do banco, que vive no PVC e so conhece a senha da inicializacao.
