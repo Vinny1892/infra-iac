@@ -100,7 +100,11 @@ vmalert:
   enabled: false
 
 vmagent:
-  enabled: true
+  # Desligado junto com o vmsingle: sem ele não há remoteWrite destino, e a
+  # CR renderizada sem o campo é rejeitada pela validação da CRD
+  # (spec.remoteWrite must be of type array: "null"). Religar junto com o
+  # vmsingle quando o volume Longhorn for consertado.
+  enabled: false
   spec:
     scrapeInterval: 30s
     resources:
@@ -137,6 +141,12 @@ kubelet:
 
 grafana:
   enabled: true
+  deploymentStrategy:
+    # Recreate obrigatório: o PVC de 2Gi é RWO e fica preso ao pod antigo.
+    # Com RollingUpdate o pod novo agenda no outro node e falha em anexar o
+    # volume (FailedAttachVolume: already used by pod antigo) — observado no
+    # rollout de 25/11, com o app preso em ProgressDeadlineExceeded.
+    type: Recreate
   # Senha do admin vem do 1Password via ExternalSecret (manifests/monitoring/).
   # Sem isto o chart gera `randAlphaNum 40` a cada render e o Secret passa a
   # divergir do banco, que vive no PVC e so conhece a senha da inicializacao.
