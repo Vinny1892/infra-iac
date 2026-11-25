@@ -141,6 +141,14 @@ kubelet:
 
 grafana:
   enabled: true
+  # Client-side apply SO neste objeto: o apiserver adiciona rollingUpdate:25%
+  # por default, e o campo fica sem owner no managedFields — o SSA do ArgoCD
+  # nunca remove campo orfao, entao Recreate+rollingUpdate nunca valida
+  # ("Forbidden: may not be specified when strategy type is Recreate").
+  # Com CSA o 3-way merge apaga o campo do live. Nao usar CSA em CRDs/CRs do
+  # operator (quebra o SSA consolidado do resto do app).
+  annotations:
+    argocd.argoproj.io/sync-options: ServerSideApply=false
   deploymentStrategy:
     # Recreate obrigatório: o PVC de 2Gi é RWO e fica preso ao pod antigo.
     # Com RollingUpdate o pod novo agenda no outro node e falha em anexar o
