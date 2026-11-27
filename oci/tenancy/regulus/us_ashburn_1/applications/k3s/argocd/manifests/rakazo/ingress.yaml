@@ -22,13 +22,6 @@ spec:
                 name: rakazo-web
                 port:
                   number: 5173
-          - path: /api
-            pathType: Prefix
-            backend:
-              service:
-                name: rakazo-api
-                port:
-                  number: 3100
   tls:
     - secretName: rakazo-tls
       hosts:
