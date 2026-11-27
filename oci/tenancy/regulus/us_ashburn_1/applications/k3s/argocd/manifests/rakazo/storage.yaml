@@ -1,54 +1,81 @@
-# PVCs do Rakazo no Longhorn (2 replicas, um volume por node — padrão do cluster).
-# Tamanhos conforme sizing do piloto: banco 20Gi, dados compartilhados 30Gi,
-# assets do web 2Gi.
+# StorageClass exclusiva do piloto: uma replica, sem custo adicional e sem
+# exigir aumento do volume OCI. O cluster tem dois nodes, mas o Longhorn nao
+# possui espaco agendavel para 52Gi x 2 replicas. Os PVCs podem ser expandidos
+# depois; habilitar uma segunda replica exige liberar capacidade ou aumentar o
+# disco (mudanca financeira separada, sempre sujeita a autorizacao explicita).
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: longhorn-single-replica
+provisioner: driver.longhorn.io
+allowVolumeExpansion: true
+reclaimPolicy: Retain
+volumeBindingMode: Immediate
+parameters:
+  numberOfReplicas: "1"
+  staleReplicaTimeout: "30"
+  fromBackup: ""
+  fsType: ext4
+  dataLocality: disabled
+  unmapMarkSnapChainRemoved: ignored
+  disableRevisionCounter: "true"
+  dataEngine: v1
+  backupTargetName: default
+---
+# PVCs v2: os primeiros volumes foram provisionados com a StorageClass default
+# de duas replicas e ficaram faulted antes de receber qualquer dado
+# (status.actualSize=0). Como storageClassName e imutavel, os novos nomes sao a
+# migracao declarativa segura. Os PVCs antigos ficam preservados pelo prune=false.
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: rakazo-database
+  name: rakazo-database-pilot
   labels:
     rakazo.example/phase: foundation
   namespace: rakazo
   annotations:
-    # O banco é a única coisa que não se reconstrói do git. Remover o app não
-    # pode levar o volume junto.
     argocd.argoproj.io/sync-options: Prune=false
+    argocd.argoproj.io/sync-wave: "0"
 spec:
   accessModes:
     - ReadWriteOnce
-  storageClassName: longhorn
+  storageClassName: longhorn-single-replica
   resources:
     requests:
-      storage: 20Gi
+      storage: 10Gi
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: rakazo-data
+  name: rakazo-data-pilot
   labels:
     rakazo.example/phase: foundation
   namespace: rakazo
   annotations:
-    # Uploads, homes de bots e caches gerados. Não reconstroem do git.
     argocd.argoproj.io/sync-options: Prune=false
+    argocd.argoproj.io/sync-wave: "0"
 spec:
   accessModes:
     - ReadWriteOnce
-  storageClassName: longhorn
+  storageClassName: longhorn-single-replica
   resources:
     requests:
-      storage: 30Gi
+      storage: 15Gi
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: rakazo-web-assets
+  name: rakazo-web-assets-pilot
   labels:
     rakazo.example/phase: foundation
   namespace: rakazo
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=false
+    argocd.argoproj.io/sync-wave: "0"
 spec:
   accessModes:
     - ReadWriteOnce
-  storageClassName: longhorn
+  storageClassName: longhorn-single-replica
   resources:
     requests:
       storage: 2Gi

@@ -4,16 +4,18 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: rakazo-migrate
+  name: rakazo-migrate-v2
   labels:
     rakazo.example/phase: migrate
   namespace: rakazo
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
 spec:
   backoffLimit: 1
   template:
     metadata:
       labels:
-        app: rakazo-migrate
+        app: rakazo-migrate-v2
     spec:
       restartPolicy: Never
       automountServiceAccountToken: false
@@ -56,16 +58,18 @@ spec:
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: rakazo-bootstrap
+  name: rakazo-bootstrap-v2
   labels:
     rakazo.example/phase: bootstrap
   namespace: rakazo
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
 spec:
   backoffLimit: 1
   template:
     metadata:
       labels:
-        app: rakazo-bootstrap
+        app: rakazo-bootstrap-v2
     spec:
       restartPolicy: Never
       automountServiceAccountToken: false

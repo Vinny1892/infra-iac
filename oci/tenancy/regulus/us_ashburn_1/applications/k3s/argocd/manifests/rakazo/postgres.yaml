@@ -8,6 +8,8 @@ metadata:
   labels:
     rakazo.example/phase: foundation
   namespace: rakazo
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
 spec:
   replicas: 1
   strategy:
@@ -68,7 +70,7 @@ spec:
       volumes:
         - name: data
           persistentVolumeClaim:
-            claimName: rakazo-database
+            claimName: rakazo-database-pilot
 ---
 apiVersion: v1
 kind: Service
