@@ -121,3 +121,61 @@ spec:
             - node
             - dist/cli/bootstrap-owner.js
           workingDir: /app/apps/api
+---
+# Monta o volume de dados sozinho antes de API e worker. Isso elimina a corrida
+# de formatação do Longhorn quando dois Pods tentam inicializar o mesmo device.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: rakazo-data-init-v1
+  namespace: rakazo
+  labels:
+    rakazo.example/phase: data-init
+  annotations:
+    argocd.argoproj.io/sync-wave: "4"
+spec:
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        app: rakazo-data-init-v1
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      securityContext:
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
+      containers:
+        - name: initialize
+          image: ghcr.io/vinny1892/rakazo/app:sha-f369df831ef84f5554be4c462108d4cbc855de4c
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            seccompProfile:
+              type: RuntimeDefault
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 128Mi
+          command:
+            - node
+            - -e
+            - >-
+              const fs=require('node:fs');
+              fs.mkdirSync('/data',{recursive:true});
+              fs.writeFileSync('/data/.volume-initialized','ok\n');
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: rakazo-data-pilot
