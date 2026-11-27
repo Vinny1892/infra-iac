@@ -1,0 +1,54 @@
+# PVCs do Rakazo no Longhorn (2 replicas, um volume por node — padrão do cluster).
+# Tamanhos conforme sizing do piloto: banco 20Gi, dados compartilhados 30Gi,
+# assets do web 2Gi.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: rakazo-database
+  labels:
+    rakazo.example/phase: foundation
+  namespace: rakazo
+  annotations:
+    # O banco é a única coisa que não se reconstrói do git. Remover o app não
+    # pode levar o volume junto.
+    argocd.argoproj.io/sync-options: Prune=false
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: longhorn
+  resources:
+    requests:
+      storage: 20Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: rakazo-data
+  labels:
+    rakazo.example/phase: foundation
+  namespace: rakazo
+  annotations:
+    # Uploads, homes de bots e caches gerados. Não reconstroem do git.
+    argocd.argoproj.io/sync-options: Prune=false
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: longhorn
+  resources:
+    requests:
+      storage: 30Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: rakazo-web-assets
+  labels:
+    rakazo.example/phase: foundation
+  namespace: rakazo
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: longhorn
+  resources:
+    requests:
+      storage: 2Gi

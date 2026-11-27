@@ -1,0 +1,85 @@
+# PostgreSQL do Rakazo — Deployment simples, conforme o exemplo upstream
+# (pg-teste/CNPG foi removido do cluster; para o piloto, o Postgres nativo do
+# Rakazo em PVC Longhorn é o caminho testado pelo upstream).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rakazo-postgres
+  labels:
+    rakazo.example/phase: foundation
+  namespace: rakazo
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: rakazo-postgres
+  template:
+    metadata:
+      labels:
+        app: rakazo-postgres
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        fsGroup: 999
+        fsGroupChangePolicy: OnRootMismatch
+      containers:
+        - name: postgres
+          # postgres:16 pinado por digest (mesma do compose oficial).
+          image: docker.io/library/postgres@sha256:e17e86066e5ef83e0952a9347f5c792b7ece00972e2aa787a6986f471b3dd3d5
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            seccompProfile:
+              type: RuntimeDefault
+            runAsNonRoot: true
+            runAsUser: 999
+            runAsGroup: 999
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+          env:
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: rakazo-secrets
+                  key: POSTGRES_PASSWORD
+            - name: POSTGRES_USER
+              value: rakazo
+            - name: POSTGRES_DB
+              value: rakazo
+          ports:
+            - containerPort: 5432
+          readinessProbe:
+            tcpSocket:
+              port: 5432
+            periodSeconds: 5
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql
+      terminationGracePeriodSeconds: 60
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: rakazo-database
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rakazo-postgres
+  labels:
+    rakazo.example/phase: foundation
+  namespace: rakazo
+spec:
+  selector:
+    app: rakazo-postgres
+  ports:
+    - port: 5432
+      targetPort: 5432
