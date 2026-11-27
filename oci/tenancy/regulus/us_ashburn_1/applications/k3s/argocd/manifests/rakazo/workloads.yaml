@@ -12,9 +12,9 @@ metadata:
     rakazo.example/phase: app
   namespace: rakazo
   annotations:
-    argocd.argoproj.io/sync-wave: "3"
+    argocd.argoproj.io/sync-wave: "5"
 spec:
-  replicas: 0
+  replicas: 1
   strategy:
     type: Recreate
   selector:
@@ -27,6 +27,8 @@ spec:
       annotations:
         rakazo.example/config-revision: bot-vinny-dev-br
     spec:
+      nodeSelector:
+        kubernetes.io/hostname: danebola-vnic
       securityContext:
         fsGroup: 1000
         fsGroupChangePolicy: OnRootMismatch
@@ -118,9 +120,9 @@ metadata:
     rakazo.example/phase: app
   namespace: rakazo
   annotations:
-    argocd.argoproj.io/sync-wave: "3"
+    argocd.argoproj.io/sync-wave: "6"
 spec:
-  replicas: 0
+  replicas: 1
   strategy:
     type: Recreate
   selector:
@@ -133,6 +135,8 @@ spec:
       annotations:
         rakazo.example/config-revision: bot-vinny-dev-br
     spec:
+      nodeSelector:
+        kubernetes.io/hostname: danebola-vnic
       securityContext:
         fsGroup: 1000
         fsGroupChangePolicy: OnRootMismatch
