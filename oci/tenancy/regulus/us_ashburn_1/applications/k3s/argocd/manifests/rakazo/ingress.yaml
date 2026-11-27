@@ -8,11 +8,11 @@ metadata:
   namespace: rakazo
   annotations:
     cert-manager.io/cluster-issuer: letsencrypt-prod
-    external-dns.alpha.kubernetes.io/hostname: rakazo.vinny.dev.br
+    external-dns.alpha.kubernetes.io/hostname: bot.vinny.dev.br
 spec:
   ingressClassName: traefik
   rules:
-    - host: rakazo.vinny.dev.br
+    - host: bot.vinny.dev.br
       http:
         paths:
           - path: /
@@ -25,4 +25,4 @@ spec:
   tls:
     - secretName: rakazo-tls
       hosts:
-        - rakazo.vinny.dev.br
+        - bot.vinny.dev.br
