@@ -11,6 +11,8 @@ metadata:
   labels:
     rakazo.example/phase: app
   namespace: rakazo
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
 spec:
   replicas: 1
   strategy:
@@ -90,7 +92,7 @@ spec:
       volumes:
         - name: data
           persistentVolumeClaim:
-            claimName: rakazo-data
+            claimName: rakazo-data-pilot
 ---
 apiVersion: v1
 kind: Service
@@ -113,6 +115,8 @@ metadata:
   labels:
     rakazo.example/phase: app
   namespace: rakazo
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
 spec:
   replicas: 1
   strategy:
@@ -181,7 +185,7 @@ spec:
       volumes:
         - name: data
           persistentVolumeClaim:
-            claimName: rakazo-data
+            claimName: rakazo-data-pilot
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -190,6 +194,8 @@ metadata:
   labels:
     rakazo.example/phase: app
   namespace: rakazo
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
 spec:
   replicas: 1
   strategy:
@@ -254,7 +260,7 @@ spec:
       volumes:
         - name: web-assets
           persistentVolumeClaim:
-            claimName: rakazo-web-assets
+            claimName: rakazo-web-assets-pilot
       terminationGracePeriodSeconds: 60
 ---
 apiVersion: v1
