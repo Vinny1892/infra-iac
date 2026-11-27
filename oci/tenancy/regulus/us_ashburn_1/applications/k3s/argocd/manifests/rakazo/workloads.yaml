@@ -24,6 +24,8 @@ spec:
     metadata:
       labels:
         app: rakazo-api
+      annotations:
+        rakazo.example/config-revision: bot-vinny-dev-br
     spec:
       securityContext:
         fsGroup: 1000
@@ -128,6 +130,8 @@ spec:
     metadata:
       labels:
         app: rakazo-worker
+      annotations:
+        rakazo.example/config-revision: bot-vinny-dev-br
     spec:
       securityContext:
         fsGroup: 1000
@@ -207,6 +211,8 @@ spec:
     metadata:
       labels:
         app: rakazo-web
+      annotations:
+        rakazo.example/config-revision: bot-vinny-dev-br
     spec:
       securityContext:
         fsGroup: 1000
