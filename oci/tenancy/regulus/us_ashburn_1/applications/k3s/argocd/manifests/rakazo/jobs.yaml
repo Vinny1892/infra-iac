@@ -127,7 +127,7 @@ spec:
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: rakazo-data-init-v1
+  name: rakazo-data-init-v2
   namespace: rakazo
   labels:
     rakazo.example/phase: data-init
@@ -138,10 +138,12 @@ spec:
   template:
     metadata:
       labels:
-        app: rakazo-data-init-v1
+        app: rakazo-data-init-v2
     spec:
       restartPolicy: Never
       automountServiceAccountToken: false
+      nodeSelector:
+        kubernetes.io/hostname: danebola-vnic
       securityContext:
         fsGroup: 1000
         fsGroupChangePolicy: OnRootMismatch
