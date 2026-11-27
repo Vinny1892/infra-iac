@@ -1,0 +1,119 @@
+# Jobs de migração e bootstrap do owner. Reexecutáveis: o sync-wave garante
+# ordem, e o ArgoCD recria o Job quando o manifesto muda (Replace=true seria
+# necessário; aqui usamos a estratégia do upstream: Job único com backoffLimit 1).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: rakazo-migrate
+  labels:
+    rakazo.example/phase: migrate
+  namespace: rakazo
+spec:
+  backoffLimit: 1
+  template:
+    metadata:
+      labels:
+        app: rakazo-migrate
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      containers:
+        - name: migrate
+          image: ghcr.io/vinny1892/rakazo/app:sha-f369df831ef84f5554be4c462108d4cbc855de4c
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            seccompProfile:
+              type: RuntimeDefault
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: rakazo-secrets
+                  key: DATABASE_URL
+            - name: DATABASE_MIGRATION_URL
+              valueFrom:
+                secretKeyRef:
+                  name: rakazo-secrets
+                  key: DATABASE_MIGRATION_URL
+          command:
+            - node
+            - dist/cli/migrate-database.js
+          workingDir: /app/apps/api
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: rakazo-bootstrap
+  labels:
+    rakazo.example/phase: bootstrap
+  namespace: rakazo
+spec:
+  backoffLimit: 1
+  template:
+    metadata:
+      labels:
+        app: rakazo-bootstrap
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      containers:
+        - name: bootstrap
+          image: ghcr.io/vinny1892/rakazo/app:sha-f369df831ef84f5554be4c462108d4cbc855de4c
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            seccompProfile:
+              type: RuntimeDefault
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: rakazo-secrets
+                  key: DATABASE_URL
+            - name: ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: rakazo-secrets
+                  key: ENCRYPTION_KEY
+            - name: BETTER_AUTH_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: rakazo-secrets
+                  key: BETTER_AUTH_SECRET
+            - name: OWNER_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: rakazo-secrets
+                  key: OWNER_PASSWORD
+          envFrom:
+            - configMapRef:
+                name: rakazo-config
+          command:
+            - node
+            - dist/cli/bootstrap-owner.js
+          workingDir: /app/apps/api

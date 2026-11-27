@@ -1,0 +1,30 @@
+# Configuração não-sensível do piloto. Equivalente ao config.env do exemplo
+# upstream, mas como ConfigMap simples (o ArgoCD aplica direto; sem kustomize).
+# O sandbox fica desligado: SANDBOX_PROVIDER=none até haver capacidade e
+# decisão de provider. O Board fica ligado: TICKET_BOARD_ENABLED=true.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rakazo-config
+  namespace: rakazo
+data:
+  NODE_ENV: "production"
+  DATA_DIR: "/data"
+  CONTENT_ENCRYPTION: "on"
+  SECRET_STORE: "encrypted"
+  SANDBOX_PROVIDER: "none"
+  TICKET_BOARD_ENABLED: "true"
+  APP_URL: "https://rakazo.vinny.dev.br"
+  WEB_URL: "https://rakazo.vinny.dev.br"
+  API_URL: "https://rakazo.vinny.dev.br"
+  OWNER_EMAIL: "vinnyaoe@gmail.com"
+---
+# Estado das migrações aplicadas. O Job de migração grava aqui o hash da
+# revisão; o valor sobrevive a syncs porque o ArgoCD ignora diferenças no campo.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rakazo-migration-state
+  namespace: rakazo
+data:
+  RAKAZO_DEPLOYED_MIGRATIONS: ""

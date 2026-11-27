@@ -1,0 +1,19 @@
+# Piloto do Rakazo no k3s OCI.
+#
+# Adaptado de docs/examples/kubernetes/ do upstream (não aplicado cegamente):
+# - storage: local-path -> longhorn (o cluster tem Longhorn em ambos os nodes);
+# - imagem: ghcr.io/elie222/rakazo/app@sha256:... -> ghcr.io/Vinny1892/rakazo/app:sha-<commit>
+#   (o fork está 124 commits à frente do upstream; a imagem vem do GHCR do próprio
+#   fork, publicada pela action publish-server-image.yml — habilitada em 2026-11-27);
+# - segredos: secretGenerator -> ExternalSecret do ESO (vault Lab-IAC, item
+#   "Rakazo Pilot"), seguindo o padrão do repositório;
+# - sandbox: SANDBOX_PROVIDER=none no piloto (sem computadores ainda);
+# - Board: TICKET_BOARD_ENABLED=true — deployment lab que liga a UI de tickets
+#   para todos (apps/api/src/env.test.ts; rotas guardam env.deploymentLabs).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: rakazo
+  labels:
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/enforce-version: v1.36

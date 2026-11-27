@@ -1,0 +1,35 @@
+# Application do piloto Rakazo. Depende do Longhorn (wave 1), do ESO (secrets)
+# e do cert-manager (TLS) — todos já reconciliados antes do wave 3.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: rakazo
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/Vinny1892/infra-iac.git
+    targetRevision: master
+    path: oci/tenancy/regulus/us_ashburn_1/applications/k3s/argocd/manifests/rakazo
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: rakazo
+  syncPolicy:
+    automated:
+      # PVCs de banco e dados não podem ser levados por uma remoção acidental
+      # do app do git. Os PVCs carregam Prune=false próprio; aqui também.
+      prune: false
+      selfHeal: true
+    retry:
+      limit: 5
+      backoff:
+        duration: 30s
+        factor: 2
+        maxDuration: 5m
+    syncOptions:
+      - CreateNamespace=false
+      - ServerSideApply=true
