@@ -20,9 +20,9 @@ spec:
     namespace: rakazo
   syncPolicy:
     automated:
-      # PVCs de banco e dados não podem ser levados por uma remoção acidental
-      # do app do git. Os PVCs carregam Prune=false próprio; aqui também.
-      prune: false
+      # Recursos removidos do Git são podados para não deixar Jobs falhos
+      # bloqueando a saúde. PVCs persistentes carregam Prune=false próprio.
+      prune: true
       selfHeal: true
     retry:
       limit: 5

@@ -79,3 +79,59 @@ spec:
   resources:
     requests:
       storage: 2Gi
+---
+# PVCs legados preservados explicitamente. Não são montados pelos workloads,
+# mas permanecem no Git para que a limpeza de Jobs órfãos nunca os remova.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: rakazo-database
+  namespace: rakazo
+  labels:
+    rakazo.example/phase: legacy-storage
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=false
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: longhorn
+  resources:
+    requests:
+      storage: 20Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: rakazo-data
+  namespace: rakazo
+  labels:
+    rakazo.example/phase: legacy-storage
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=false
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: longhorn
+  resources:
+    requests:
+      storage: 30Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: rakazo-web-assets
+  namespace: rakazo
+  labels:
+    rakazo.example/phase: legacy-storage
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=false
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: longhorn
+  resources:
+    requests:
+      storage: 2Gi
