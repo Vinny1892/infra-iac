@@ -105,6 +105,41 @@ resource "cloudflare_zero_trust_access_policy" "rakazo_kubernetes_mcp" {
   }
 }
 
+# A zona usa SSL Flexible globalmente. Este ruleset já existia no painel;
+# importamo-lo para preservar sua regra legada e aplicar Full (strict) somente
+# ao hostname do Kubernetes MCP.
+resource "cloudflare_ruleset" "http_config_settings" {
+  zone_id     = var.zone_id
+  name        = "default"
+  description = ""
+  kind        = "zone"
+  phase       = "http_config_settings"
+
+  rules {
+    action      = "set_config"
+    description = "ssl rule rewrite"
+    enabled     = false
+    expression  = "(http.host eq \"seila.vinny.dev.br\")"
+    ref         = "fce8ae6674dd4a38b318d0798b9deae1"
+
+    action_parameters {
+      ssl = "full"
+    }
+  }
+
+  rules {
+    action      = "set_config"
+    description = "Kubernetes MCP origin TLS"
+    enabled     = true
+    expression  = "(http.host eq \"k8s-mcp.vinny.dev.br\")"
+    ref         = "kubernetes-mcp-full-strict"
+
+    action_parameters {
+      ssl = "strict"
+    }
+  }
+}
+
 output "kubernetes_mcp_access_client_id" {
   value     = cloudflare_zero_trust_access_service_token.rakazo_kubernetes_mcp.client_id
   sensitive = true
