@@ -13,17 +13,15 @@ spec:
     - Ingress
     - Egress
   ingress:
+    # Todo acesso, inclusive do Rakazo, deve atravessar o Cloudflare Access.
+    # Somente o Traefik recebe conexão direta dentro do cluster.
     - from:
         - namespaceSelector:
             matchLabels:
-              kubernetes.io/metadata.name: rakazo
+              kubernetes.io/metadata.name: kube-system
           podSelector:
-            matchExpressions:
-              - key: app
-                operator: In
-                values:
-                  - rakazo-api
-                  - rakazo-worker
+            matchLabels:
+              app.kubernetes.io/name: traefik
       ports:
         - port: 8080
           protocol: TCP
