@@ -1,5 +1,5 @@
-# O MCP não é publicado por Ingress. Somente API/worker do Rakazo podem abrir
-# o Streamable HTTP, e o servidor só sai para DNS e para o Service da API K3s.
+# O MCP é publicado somente pelo Ingress protegido por Cloudflare Access.
+# O servidor só recebe tráfego do Traefik e só sai para DNS e para a API K3s.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -18,7 +18,7 @@ spec:
     - from:
         - namespaceSelector:
             matchLabels:
-              kubernetes.io/metadata.name: kube-system
+              kubernetes.io/metadata.name: traefik
           podSelector:
             matchLabels:
               app.kubernetes.io/name: traefik
