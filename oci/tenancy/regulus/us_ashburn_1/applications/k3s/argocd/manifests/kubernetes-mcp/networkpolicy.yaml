@@ -1,0 +1,48 @@
+# O MCP não é publicado por Ingress. Somente API/worker do Rakazo podem abrir
+# o Streamable HTTP, e o servidor só sai para DNS e para o Service da API K3s.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: kubernetes-mcp-isolation
+  namespace: kubernetes-mcp
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: kubernetes-mcp-server
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Todo acesso, inclusive do Rakazo, deve atravessar o Cloudflare Access.
+    # Somente o Traefik recebe conexão direta dentro do cluster.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: traefik
+      ports:
+        - port: 8080
+          protocol: TCP
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    - to:
+        # Service kubernetes.default do K3s; o repo já registra este endereço
+        # como o ClusterIP da API em workloads que precisam alcançá-la.
+        - ipBlock:
+            cidr: 10.43.0.1/32
+      ports:
+        - port: 443
+          protocol: TCP
