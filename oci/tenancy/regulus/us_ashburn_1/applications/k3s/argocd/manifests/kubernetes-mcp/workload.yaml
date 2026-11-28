@@ -1,0 +1,142 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kubernetes-mcp-server-config
+  namespace: kubernetes-mcp
+  labels:
+    app.kubernetes.io/name: kubernetes-mcp-server
+data:
+  config.toml: |
+    port = "8080"
+    bind_address = "0.0.0.0"
+    stateless = true
+    log_level = 0
+    log_file = "stderr"
+    list_output = "table"
+
+    # Guardrails do processo. O controle autoritativo continua sendo o RBAC.
+    read_only = true
+    disable_destructive = true
+    validation_enabled = true
+    confirmation_fallback = "deny"
+    toolsets = ["core"]
+
+    # Evita respostas enormes sendo despejadas no contexto do agente.
+    max_backend_response_bytes = 1048576
+    max_result_bytes = 131072
+    max_in_flight = 4
+
+    # Defesa em profundidade: estes objetos também não existem no RBAC.
+    [[denied_resources]]
+    group = ""
+    version = "v1"
+    kind = "Secret"
+
+    [[denied_resources]]
+    group = ""
+    version = "v1"
+    kind = "ConfigMap"
+
+    [[denied_resources]]
+    group = ""
+    version = "v1"
+    kind = "ServiceAccount"
+
+    [[denied_resources]]
+    group = "rbac.authorization.k8s.io"
+    version = "v1"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kubernetes-mcp-server
+  namespace: kubernetes-mcp
+  labels:
+    app.kubernetes.io/name: kubernetes-mcp-server
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kubernetes-mcp-server
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: kubernetes-mcp-server
+      annotations:
+        kubernetes-mcp.example/config-revision: readonly-v1
+    spec:
+      serviceAccountName: kubernetes-mcp-server
+      automountServiceAccountToken: true
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: kubernetes-mcp-server
+          image: ghcr.io/containers/kubernetes-mcp-server@sha256:6347155616c49c78512114500688b50d275ddde7597b6a38cefe6f40a8c42c16
+          imagePullPolicy: IfNotPresent
+          args:
+            - --config
+            - /etc/kubernetes-mcp/config.toml
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 15
+            timeoutSeconds: 3
+          resources:
+            requests:
+              cpu: 25m
+              memory: 64Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi
+          volumeMounts:
+            - name: config
+              mountPath: /etc/kubernetes-mcp
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: config
+          configMap:
+            name: kubernetes-mcp-server-config
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi
+      terminationGracePeriodSeconds: 30
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kubernetes-mcp-server
+  namespace: kubernetes-mcp
+  labels:
+    app.kubernetes.io/name: kubernetes-mcp-server
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: kubernetes-mcp-server
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      protocol: TCP

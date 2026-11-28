@@ -1,0 +1,32 @@
+# Kubernetes MCP privado para diagnóstico read-only pelo Rakazo.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kubernetes-mcp
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "4"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/Vinny1892/infra-iac.git
+    targetRevision: master
+    path: oci/tenancy/regulus/us_ashburn_1/applications/k3s/argocd/manifests/kubernetes-mcp
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kubernetes-mcp
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      limit: 5
+      backoff:
+        duration: 30s
+        factor: 2
+        maxDuration: 5m
+    syncOptions:
+      - CreateNamespace=false
+      - ServerSideApply=true

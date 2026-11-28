@@ -29,6 +29,9 @@ data:
   EMAIL_PROVIDER: "none"
   SANDBOX_PROVIDER: "none"
   TICKET_BOARD_ENABLED: "true"
+  # Permite endpoints MCP privados cadastrados pelo owner. Endereços de
+  # metadata e link-local continuam bloqueados pelo Rakazo.
+  MCP_ALLOW_PRIVATE_ENDPOINT: "true"
   DB_POOL_MAX: "10"
   RAYON_NUM_THREADS: "2"
 ---

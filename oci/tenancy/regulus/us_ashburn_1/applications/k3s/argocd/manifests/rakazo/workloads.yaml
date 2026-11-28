@@ -25,7 +25,7 @@ spec:
       labels:
         app: rakazo-api
       annotations:
-        rakazo.example/config-revision: bot-vinny-dev-br
+        rakazo.example/config-revision: kubernetes-mcp-private-v1
     spec:
       nodeSelector:
         kubernetes.io/hostname: danebola-vnic
@@ -133,7 +133,7 @@ spec:
       labels:
         app: rakazo-worker
       annotations:
-        rakazo.example/config-revision: bot-vinny-dev-br
+        rakazo.example/config-revision: kubernetes-mcp-private-v1
     spec:
       nodeSelector:
         kubernetes.io/hostname: danebola-vnic
